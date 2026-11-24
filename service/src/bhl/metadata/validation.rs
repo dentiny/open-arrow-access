@@ -68,11 +68,15 @@ pub(super) fn validate_database_header(count: u64, version: u64) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn validate_title_keys(valid: bool) -> Result<()> {
-    if !valid {
+pub(super) fn validate_title_keys(rows: u64, numeric_keys: u64) -> Result<()> {
+    if rows != numeric_keys {
         return Err(error::invalid("invalid or duplicate numeric key in title"));
     }
     Ok(())
+}
+
+pub(super) fn validate_source_key(value: &str) -> Result<()> {
+    super::super::pages::identity::number(value).map(|_| ())
 }
 
 pub(super) fn validate_database_manifest(

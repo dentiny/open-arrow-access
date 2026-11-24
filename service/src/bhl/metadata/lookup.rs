@@ -3,7 +3,9 @@ use super::{error, tables, validation};
 use crate::duckdb::ManagedConnection;
 use open_arrow_access_core::Result;
 
-pub(super) fn available(connection: &ManagedConnection) -> Result<bool> {
+/// Select a fixed query script after validating the optional immutable profile.
+/// The database handle retains this choice instead of inspecting it on each read.
+pub(super) fn query_sql(connection: &ManagedConnection) -> Result<&'static str> {
     let exists: bool = connection
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM information_schema.tables
@@ -14,7 +16,7 @@ pub(super) fn available(connection: &ManagedConnection) -> Result<bool> {
         )
         .map_err(error::duckdb)?;
     if !exists {
-        return Ok(false);
+        return Ok(include_str!("raw_views.sql"));
     }
     let (count, version): (u64, Option<u64>) = connection
         .query_row(
@@ -31,5 +33,5 @@ pub(super) fn available(connection: &ManagedConnection) -> Result<bool> {
         let prepared_count = connection.table_row_count(&format!("__bhl_lookup_{}", table.name))?;
         validation::validate_lookup_rows(raw_count, prepared_count)?;
     }
-    Ok(true)
+    Ok(include_str!("lookup_views.sql"))
 }

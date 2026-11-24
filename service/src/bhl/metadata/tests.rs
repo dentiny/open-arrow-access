@@ -450,6 +450,18 @@ async fn databases_reopen_without_source_access_and_keep_provenance() {
     drop(metadata);
     drop(root); // Reopening and queries cannot fall back to the TSV inputs.
     let database = BhlMetadata::open(&path).unwrap();
+    let stored_views: u64 = database
+        .connection
+        .lock()
+        .unwrap()
+        .query_row(
+            "SELECT count(*) FROM duckdb_views() WHERE database_name=current_database()
+             AND NOT temporary AND view_name LIKE 'bhl_%'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(stored_views, 0); // Query helpers are no longer persisted at import.
     assert_eq!(database.info.fingerprint, fingerprint);
     let other = BhlMetadata::open(&path).unwrap();
     assert_eq!(read(&other, &[ITEM]).len(), 1);
@@ -558,6 +570,31 @@ async fn plain_tables_open_read_only_without_importer_objects_and_keep_query_iso
     );
     drop(metadata);
     assert_eq!(tokio::fs::read(&path).await.unwrap(), original);
+}
+
+#[tokio::test]
+async fn query_local_helpers_override_legacy_persisted_helpers() {
+    let (_directory, path, expected) = plain_database().await;
+    let connection = ::duckdb::Connection::open(&path).unwrap();
+    connection
+        .execute_batch(
+            "CREATE MACRO bhl_id(value) AS 0::UBIGINT;
+             CREATE VIEW bhl_page AS SELECT 0::UBIGINT AS __key;
+             CHECKPOINT;",
+        )
+        .unwrap();
+    drop(connection);
+    let before = tokio::fs::read(&path).await.unwrap();
+    let metadata = BhlMetadata::open_tables(&path, "legacy-helpers").unwrap();
+    let actual = read(&metadata, &[ITEM, PART]);
+    assert_eq!(actual.len(), expected.len());
+    for (actual, expected) in actual.iter().zip(&expected) {
+        assert_eq!(actual.metadata, expected.metadata);
+        assert_eq!(actual.missing, expected.missing);
+        assert_eq!(actual.conflicts, expected.conflicts);
+    }
+    drop(metadata);
+    assert_eq!(tokio::fs::read(&path).await.unwrap(), before);
 }
 
 #[tokio::test]

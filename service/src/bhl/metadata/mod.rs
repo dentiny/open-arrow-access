@@ -20,7 +20,6 @@ struct Table {
     name: String,
     fields: Fields,
     key: usize,
-    single: bool,
 }
 fn tables() -> Vec<Table> {
     let schema = page_schema();
@@ -61,7 +60,6 @@ fn tables() -> Vec<Table> {
                 name: child.name().clone(),
                 fields,
                 key,
-                single: child.name() == "title",
             }
         })
         .collect()
@@ -100,9 +98,14 @@ impl BhlMetadata {
         let connection = self
             .connection
             .lock()
-            .map_err(|_| error::invalid("DuckDB metadata connection lock poisoned"))?
+            .map_err(error::metadata_lock)?
             .try_clone()?;
-        source::prepare_queries(&connection)?;
+        connection
+            .execute_batch(include_str!("id.sql"))
+            .map_err(error::duckdb)?;
+        connection
+            .execute_batch(self.query_sql)
+            .map_err(error::duckdb)?;
         Ok(connection)
     }
 

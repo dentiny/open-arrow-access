@@ -24,6 +24,16 @@ Index eligibility and benefit depend on the actual query plan and selection size
 inspect `EXPLAIN ANALYZE` rather than assuming every join will use an index.
 
 Metadata is included with `service-bhl` (service-crate feature `bhl`).
+
+Opening either database format goes through one initializer: it validates the
+numeric title keys and optional lookup profile once, then retains the appropriate
+query script. Each query clone installs the temporary ID macro and either
+[`raw_views.sql`](src/bhl/metadata/raw_views.sql) or
+[`lookup_views.sql`](src/bhl/metadata/lookup_views.sql). There are no persistent/
+temporary view mode flags or per-request profile/schema checks. New imports store
+only raw tables and provenance; old files containing persisted helper views are
+still readable, with query-local views taking precedence.
+
 The implementation uses the bundled Rust DuckDB binding on the 1.10506.x line;
 the lockfile selects 1.10506.1. This line uses Arrow 58, matching the public
 workspace schema. The dependency range stays on that binding line so fresh
@@ -156,9 +166,11 @@ Metadata import sends decoded Arrow batches directly through DuckDB's Arrow
 appender. Each table keeps one appender and explicitly flushes once at EOF.
 It retains lexical-row SHA-256 hashing and source order; no source rows are
 filtered or reinterpreted. Source tables store only the lexical columns, so
-decoded batches are appended without adding key or ordinal arrays. Views expose
-the table's `rowid` for ordering and calculate numeric join keys from the original
-ID columns with `bhl_id`. This removes per-cell owned String/Value creation,
+decoded batches are appended without adding key or ordinal arrays. Query-local
+SQL views expose the source `rowid` for ordering. Raw views calculate
+numeric keys with `bhl_id`; lookup views use the stored key and ordinal. DuckDB
+builds the record struct directly from the source columns rather than Rust
+formatting each struct field. This removes per-cell owned String/Value creation,
 per-row appender calls, and per-batch appender recreation/flush. Each table
 uses one blocking importer while its asynchronous byte reader runs on the
 existing runtime; all 13 import tasks are joined before returning.
@@ -171,8 +183,8 @@ selection appender flushes once before the join query runs.
 
 A coordinator imports the 13 TSV tables directly into a persistent DuckDB
 file. Independent processes open that file read-only. Per-query page selections
-use connection-local temporary tables, without a separate in-memory database,
-source-data copy or forwarding views.
+use connection-local temporary tables and views without copying the source tables
+into a separate in-memory database.
 
 ```rust,ignore
 BhlMetadata::create(storage.clone(), "bhl-metadata.duckdb").await?;

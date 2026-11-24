@@ -36,6 +36,7 @@ pub struct BhlMetadataInfo {
 pub struct BhlMetadata {
     pub info: BhlMetadataInfo,
     pub(super) connection: Mutex<ManagedConnection>,
+    pub(super) query_sql: &'static str,
 }
 
 fn hex(bytes: impl AsRef<[u8]>) -> String {
@@ -51,73 +52,6 @@ fn quoted(name: &str) -> String {
     format!("\"{}\"", name.replace('"', "\"\""))
 }
 
-pub(super) fn create_id_macro(connection: &::duckdb::Connection, temporary: bool) -> Result<()> {
-    let scope = if temporary { "TEMP " } else { "" };
-    connection
-        .execute_batch(&format!(
-            "CREATE {scope}MACRO bhl_id(value) AS CASE
-             WHEN regexp_full_match(value, '[+]?[0-9]+')
-             THEN nullif(try_cast(value AS UBIGINT), 0) END;"
-        ))
-        .map_err(error::duckdb)
-}
-
-#[derive(Clone, Copy)]
-enum ViewKind {
-    PersistentRaw,
-    TemporaryRaw,
-    TemporaryLookup,
-}
-
-fn create_view(
-    connection: &::duckdb::Connection,
-    table: &super::Table,
-    kind: ViewKind,
-) -> Result<()> {
-    let name = &table.name;
-    let key = quoted(table.fields[table.key].name());
-    let columns = table
-        .fields
-        .iter()
-        .map(|field| quoted(field.name()))
-        .collect::<Vec<_>>();
-    let fields = columns
-        .iter()
-        .map(|name| format!("{name} := {name}"))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let raw = format!(
-        "SELECT *, rowid, bhl_id({key}) AS __key,
-         struct_pack({fields}) AS __record FROM main.{}",
-        quoted(name)
-    );
-    let sql = match kind {
-        ViewKind::PersistentRaw => format!("CREATE VIEW bhl_{name} AS {raw}"),
-        ViewKind::TemporaryRaw => format!("CREATE TEMP VIEW bhl_{name} AS {raw}"),
-        ViewKind::TemporaryLookup => format!(
-            "CREATE TEMP VIEW bhl_{name} AS
-             SELECT {}, __source_rowid AS rowid, __key,
-             struct_pack({fields}) AS __record FROM main.__bhl_lookup_{name}",
-            columns.join(", ")
-        ),
-    };
-    connection.execute_batch(&sql).map_err(error::duckdb)
-}
-
-/// Temporary objects are connection-local and never alter the supplied file.
-pub(super) fn prepare_queries(connection: &ManagedConnection) -> Result<()> {
-    create_id_macro(connection, true)?;
-    let kind = if super::lookup::available(connection)? {
-        ViewKind::TemporaryLookup
-    } else {
-        ViewKind::TemporaryRaw
-    };
-    for table in tables() {
-        create_view(connection, &table, kind)?;
-    }
-    Ok(())
-}
-
 async fn import_table(
     connection: ManagedConnection,
     input: Arc<dyn ByteAccessor>,
@@ -129,12 +63,6 @@ async fn import_table(
         .map(|field| format!("{} VARCHAR NOT NULL", quoted(field.name())))
         .collect::<Vec<_>>()
         .join(", ");
-    connection
-        .execute_batch(&format!(
-            "CREATE TABLE {} ({columns});",
-            quoted(&table.name)
-        ))
-        .map_err(error::duckdb)?;
     let schema = Arc::new(Schema::new(
         table
             .fields
@@ -154,7 +82,14 @@ async fn import_table(
     let mut reader = csv.open(ReadRequest::new(path.clone())).await?;
     let import_name = table.name.clone();
     let key_column = table.key;
-    let (connection, count, hash) = tokio::task::spawn_blocking(move || {
+    let source_path = format!("{}{path}", super::super::OPEN_DATA_BUCKET_URL);
+    tokio::task::spawn_blocking(move || {
+        connection
+            .execute_batch(&format!(
+                "CREATE TABLE {} ({columns});",
+                quoted(&import_name)
+            ))
+            .map_err(error::duckdb)?;
         let mut count = 0u64;
         let mut hash = Sha256::new();
         // Avoid repeated auto-commits while a persistent table is imported.
@@ -177,7 +112,7 @@ async fn import_table(
                     .iter()
                     .map(|column| column.value(row))
                     .collect::<Vec<_>>();
-                super::super::pages::identity::number(cells[key_column])?;
+                super::validation::validate_source_key(cells[key_column])?;
                 // Preserve the decoded lexical-row fingerprint exactly.
                 hash.update(serde_json::to_vec(&cells).map_err(error::json)?);
                 hash.update(b"\n");
@@ -189,37 +124,11 @@ async fn import_table(
         appender.flush().map_err(error::duckdb)?;
         drop(appender);
         connection.execute_batch("COMMIT").map_err(error::duckdb)?;
-        Ok::<_, open_arrow_access_core::Error>((connection, count, hash))
-    })
-    .await
-    .map_err(error::task)??;
-    tokio::task::spawn_blocking(move || {
-        let key = quoted(table.fields[table.key].name());
-        if table.single {
-            let duplicate = connection.query_row(
-                &format!(
-                    "SELECT bhl_id({key}) AS numeric_key FROM {} GROUP BY numeric_key HAVING count(*) > 1 LIMIT 1",
-                    quoted(&table.name)
-                ),
-                [],
-                |row| row.get::<_, u64>(0),
-            );
-            match duplicate {
-                Ok(key) => {
-                    return Err(error::invalid(format!(
-                        "duplicate numeric key in {}: {key}",
-                        table.name
-                    )));
-                }
-                Err(::duckdb::Error::QueryReturnedNoRows) => {}
-                Err(source) => return Err(error::duckdb(source)),
-            }
-        }
-        create_view(&connection, &table, ViewKind::PersistentRaw)?;
+        connection.close()?;
         Ok((
-            table.name,
+            import_name,
             SourceInfo {
-                path: format!("{}{path}", super::super::OPEN_DATA_BUCKET_URL),
+                path: source_path,
                 rows: count,
                 sha256: hex(hash.finalize()),
             },
@@ -241,7 +150,6 @@ impl BhlMetadata {
         storage: A,
         connection: ManagedConnection,
     ) -> Result<Self> {
-        create_id_macro(&connection, false)?;
         let input: Arc<dyn ByteAccessor> =
             Arc::new(Arc::new(storage).layer(DecompressionLayer::new(Gzip)));
         let mut imports = Vec::new();
@@ -260,13 +168,13 @@ impl BhlMetadata {
         let fingerprint = hex(Sha256::digest(
             serde_json::to_vec(&(&source_root, &sources)).map_err(error::json)?,
         ));
-        Ok(Self {
-            connection: Mutex::new(connection),
-            info: BhlMetadataInfo {
-                source_root,
-                fingerprint,
-                sources,
-            },
-        })
+        let info = BhlMetadataInfo {
+            source_root,
+            fingerprint,
+            sources,
+        };
+        tokio::task::spawn_blocking(move || Self::from_connection(connection, info))
+            .await
+            .map_err(error::task)?
     }
 }
