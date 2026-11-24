@@ -81,7 +81,7 @@ pub struct BhlPageMetadata {
     pub conflicts: Vec<String>,
 }
 impl BhlMetadata {
-    /// Execute one join query and emit each selected page to the callback.
+    /// Scope the selection once, then emit pages from bounded join batches.
     /// This is synchronous; call from a blocking worker in async applications.
     /// Only unique metadata-sequence-matching keys are emitted; missing or
     /// ambiguous matches fail before the callback. Returning an error from the

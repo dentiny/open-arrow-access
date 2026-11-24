@@ -9,6 +9,52 @@ const PART: &str = "ocr/part-8/part-8-3-1.txt";
 const MISSING: &str = "ocr/item-20/item-20-30-1.txt";
 
 #[tokio::test]
+async fn batched_join_preserves_nonadjacent_versions_and_request_order() {
+    let metadata = load_with_sql("").await;
+    let paths = ["ocr/item-2/item-2-3-999.txt", PART, ITEM];
+    let expected = read(&metadata, &paths);
+    for batch_size in [1, 2] {
+        let connection = metadata.query_connection().unwrap();
+        let mut rows = Vec::new();
+        join::for_each_batched(
+            &connection,
+            &paths.map(ObjectRef::new),
+            batch_size,
+            |page| {
+                rows.push(page);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_pages_eq(&rows, &expected);
+        assert_eq!(
+            rows.iter()
+                .map(|row| row.object.locator())
+                .collect::<Vec<_>>(),
+            [PART, ITEM]
+        );
+    }
+}
+
+#[tokio::test]
+async fn batched_join_rejects_duplicate_authoritative_keys_across_batches() {
+    let metadata = load_with_sql("").await;
+    let connection = metadata.query_connection().unwrap();
+    let mut emitted = 0;
+    let result = join::for_each_batched(
+        &connection,
+        &[ITEM, PART, ITEM].map(ObjectRef::new),
+        1,
+        |_| {
+            emitted += 1;
+            Ok(())
+        },
+    );
+    assert!(result.is_err());
+    assert_eq!(emitted, 0);
+}
+
+#[tokio::test]
 async fn prepared_lookup_preserves_lexical_values_relation_order_and_read_only_queries() {
     let (_directory, path, expected) = plain_database().await;
     BhlMetadata::prepare_lookup(&path).await.unwrap();
