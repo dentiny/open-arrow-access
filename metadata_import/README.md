@@ -51,8 +51,8 @@ and list element names.
 
 The [CourtListener import script](courtlistener/ingest-courtlistener.sql) creates
 and populates all four typed source tables directly from public HTTPS bzip2 CSVs.
-It installs/loads `httpfs` and `compression_fs`, preserves inline TEXT/HTML/XML
-and PDF references, and validates unique IDs.
+It force-installs/loads `cache_httpfs` and `compression_fs` from community,
+preserves inline TEXT/HTML/XML and PDF references, and validates unique IDs.
 
 ```sh
 duckdb -bail -storage-version v1.5.0 /path/to/courtlistener.duckdb \

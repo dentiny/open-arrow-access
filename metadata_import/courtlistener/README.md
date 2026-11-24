@@ -2,7 +2,7 @@
 
 [ingest-courtlistener.sql](ingest-courtlistener.sql) creates **and populates**
 `opinions`, `opinion_clusters`, `dockets` and `courts` in a new DuckDB file.
-It reads the public HTTPS `.csv.bz2` exports directly, using `httpfs` for HTTP
+It reads the public HTTPS `.csv.bz2` exports directly, using `cache_httpfs` for cached HTTP
 and the community `compression_fs` extension for bzip2 decompression.
 
 Tested with DuckDB 2.0.0. Run from the repository root against a new file:
@@ -12,8 +12,8 @@ duckdb -bail -storage-version v1.5.0 /path/to/courtlistener.duckdb \
   < metadata_import/courtlistener/ingest-courtlistener.sql
 ```
 
-The script installs/loads both extensions, creates the four explicit typed
-tables, inserts rows through `read_csv()`, rejects duplicate IDs and checkpoints
+The script force-installs both extensions from community, loads them and creates
+the four explicit typed tables. It inserts rows through `read_csv()`, rejects duplicate IDs and checkpoints
 the database. No Rust importer or second SQL file is needed. The storage-version
 flag keeps the file readable by the library's DuckDB 1.5.x binding.
 

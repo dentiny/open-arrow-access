@@ -1,9 +1,9 @@
 -- Run this complete CREATE + IMPORT script against a NEW database with DuckDB -bail.
 -- Tested with DuckDB 2.0.0 and the published compression_fs extension.
--- httpfs supplies HTTPS; compression_fs supplies .bz2 decoding.
-INSTALL httpfs;
-LOAD httpfs;
-INSTALL compression_fs FROM community;
+-- cache_httpfs supplies cached HTTP access; compression_fs supplies .bz2 decoding.
+FORCE INSTALL cache_httpfs FROM community;
+LOAD cache_httpfs;
+FORCE INSTALL compression_fs FROM community;
 LOAD compression_fs;
 
 -- Review the source headers against the explicit table definitions below before changing the date.
