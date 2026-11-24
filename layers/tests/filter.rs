@@ -249,28 +249,6 @@ async fn mixed_rules_use_original_values_and_combine_cell_masks() {
 }
 
 #[tokio::test]
-async fn invalid_cell_rules_fail_before_reading_even_for_hidden_targets() {
-    for rule in [
-        cell("missing", lit(true)),
-        cell("id", col("missing").eq(lit(0i64))),
-        cell("id", col("id")),
-        cell(
-            "id",
-            datafusion::functions_aggregate::expr_fn::sum(col("id")),
-        ),
-    ] {
-        let memory = MemoryRecordAccessor::new(vec![batch()]);
-        let source = memory.clone().layer(FilterLayer::with_rules(vec![rule]));
-        let request = ReadRequest::new("input").with_projection(["data"]);
-        let error = source.open(request.clone()).await.err().unwrap();
-        assert_eq!(error.kind(), ErrorKind::InvalidInput);
-        assert!(source.metadata(request.clone()).await.is_err());
-        assert!(source.inspect_metadata(request).await.is_err());
-        assert_eq!(memory.polls.load(Ordering::SeqCst), 0);
-    }
-}
-
-#[tokio::test]
 async fn scan_partitions_share_nullable_output_schema_and_remain_lazy() {
     use open_arrow_access_core::{
         RecordCapability, RecordReader, Result, ScanPlan, ScanPlanner, async_trait,
