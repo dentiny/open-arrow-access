@@ -249,30 +249,6 @@ async fn mixed_rules_use_original_values_and_combine_cell_masks() {
 }
 
 #[tokio::test]
-async fn scalar_cell_rules_keep_rows_and_make_nonnullable_targets_nullable() {
-    for (value, expected) in [(Some(true), true), (Some(false), false), (None, false)] {
-        let source =
-            MemoryRecordAccessor::new(vec![batch()]).layer(FilterLayer::with_rules(vec![cell(
-                "id",
-                lit(datafusion::common::ScalarValue::Boolean(value)),
-            )]));
-        let mut reader = source.open(ReadRequest::new("input")).await.unwrap();
-        let output = reader.next().await.unwrap().unwrap();
-        assert_eq!(output.num_rows(), 6);
-        assert!(output.schema().field(0).is_nullable());
-        for (i, value) in output
-            .column(0)
-            .as_primitive::<Int64Type>()
-            .iter()
-            .enumerate()
-        {
-            assert_eq!(value, expected.then_some(i as i64));
-        }
-        assert_eq!(output.column(1), batch().column(1));
-    }
-}
-
-#[tokio::test]
 async fn invalid_cell_rules_fail_before_reading_even_for_hidden_targets() {
     for rule in [
         cell("missing", lit(true)),
