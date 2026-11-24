@@ -31,15 +31,6 @@ fn strings(column: &dyn Array, row: usize) -> Result<Vec<String>> {
 pub(super) fn for_each(
     connection: &::duckdb::Connection,
     keys: &[ObjectRef],
-    emit: impl FnMut(BhlPageMetadata) -> Result<()>,
-) -> Result<()> {
-    for_each_batched(connection, keys, SELECTION_BATCH_SIZE, emit)
-}
-
-pub(super) fn for_each_batched(
-    connection: &::duckdb::Connection,
-    keys: &[ObjectRef],
-    batch_size: usize,
     mut emit: impl FnMut(BhlPageMetadata) -> Result<()>,
 ) -> Result<()> {
     if keys.is_empty() {
@@ -113,8 +104,8 @@ pub(super) fn for_each_batched(
         .execute_batch("ALTER TABLE bhl_selection RENAME TO bhl_all_selection")
         .map_err(error::duckdb)?;
     let mut joined_rows = 0;
-    for start in (0..keys.len()).step_by(batch_size) {
-        let end = start.saturating_add(batch_size).min(keys.len());
+    for start in (0..keys.len()).step_by(SELECTION_BATCH_SIZE) {
+        let end = start.saturating_add(SELECTION_BATCH_SIZE).min(keys.len());
         connection
             .execute_batch(&format!(
                 include_str!("batch_selection.sql"),
