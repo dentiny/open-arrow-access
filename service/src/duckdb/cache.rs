@@ -118,7 +118,7 @@ impl CachePolicy {
         };
         Ok(settings
             .into_iter()
-            .map(|(name, value)| format!("SET GLOBAL {name} = {value}; SET {name} = {value};"))
+            .map(|(name, value)| format!("SET GLOBAL {name} = {value};"))
             .collect())
     }
 }

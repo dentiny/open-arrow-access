@@ -96,7 +96,7 @@ impl ManagedConnection {
     pub(crate) fn configure_remote_cache(&self) -> Result<()> {
         let cache = self.directory.path().join("http-cache");
         std::fs::create_dir_all(&cache).map_err(error::scratch)?;
-        // Global defaults reach clones; local settings override initialization SQL.
+        // Database-level settings are shared by existing and future clones.
         let policy = self.cache_policy.sql()?;
         self.connection
             .execute_batch(&format!(
@@ -104,10 +104,7 @@ impl ManagedConnection {
                  LOAD cache_httpfs;
                  {policy}
                  SET GLOBAL cache_httpfs_cache_directories_config = '';
-                 SET cache_httpfs_cache_directories_config = '';
-                 SET GLOBAL cache_httpfs_cache_directory = '{}';
-                 SET cache_httpfs_cache_directory = '{}';",
-                cache.to_string_lossy().replace('\'', "''"),
+                 SET GLOBAL cache_httpfs_cache_directory = '{}';",
                 cache.to_string_lossy().replace('\'', "''")
             ))
             .map_err(error::cache_setup)
