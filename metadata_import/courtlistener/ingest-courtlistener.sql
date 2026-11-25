@@ -24,7 +24,7 @@ FROM read_csv(
     all_varchar = true,
     nullstr = '',
     allow_quoted_nulls = false,
-    parallel = false,
+    parallel = true,
     hive_partitioning = false,
     max_line_size = 67108864,
     buffer_size = 67108864
@@ -184,7 +184,7 @@ CREATE TABLE courts (
 );
 
 -- INSERT casts into the explicit types/NOT NULL constraints above.
--- Read each file sequentially so ordinals retain original CSV record order.
+-- Keep the bounded CSV scan path enabled; row_number captures source order.
 BEGIN TRANSACTION;
 INSERT INTO opinions BY NAME
 SELECT *, (row_number() OVER () - 1)::UBIGINT AS __courtlistener_ordinal

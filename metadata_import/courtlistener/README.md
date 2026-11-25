@@ -30,8 +30,11 @@ multiline text, unquoted NULL and quoted empty strings are preserved. The signed
 `citation_count` column preserves negative source values (including `-1` in the
 2026-09-30 export). Native DuckDB cast rules apply; this is not the provider's
 stricter lexical validator.
-Sequential CSV reads plus `preserve_insertion_order` retain zero-based logical
-record ordinals in `__courtlistener_ordinal`. The 64 MiB line/buffer limit is
+The CSV reader keeps `parallel = true`; `preserve_insertion_order` and
+`row_number() OVER ()` retain zero-based logical record ordinals in
+`__courtlistener_ordinal`. Forcing `parallel = false` caused CSV reader buffers
+to accumulate and exhausted a 12 GB limit on the full 2026-09-30 cluster export,
+even with a single DuckDB thread. Keep the default parallel scan path enabled. The 64 MiB line/buffer limit is
 explicit and may need increasing for larger legitimate records; parse errors
 fail instead of dropping rows.
 
