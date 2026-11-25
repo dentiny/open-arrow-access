@@ -30,6 +30,7 @@ use std::sync::Arc;
 #[derive(Clone, Debug)]
 pub struct CsvFileFormat {
     schema: Option<SchemaRef>,
+    skip_rows: usize,
     schema_mode: CsvSchemaMode,
     inference: CsvInferenceOptions,
     options: CsvOptions,
@@ -56,6 +57,7 @@ impl CsvFileFormat {
     pub fn infer() -> Self {
         Self {
             schema: None,
+            skip_rows: 0,
             schema_mode: CsvSchemaMode::Infer,
             inference: CsvInferenceOptions::default(),
             options: CsvOptions::Dialect(CsvDialect::default()),
@@ -90,6 +92,14 @@ impl CsvFileFormat {
     /// This affects suffix recognition only; bytes are still decoded by the layer.
     pub fn with_compression_factory(mut self, factory: CompressionFactory) -> Self {
         self.compression_factory = factory;
+        self
+    }
+
+    /// Skip physical LF or CRLF lines before header detection and CSV parsing.
+    /// Applied once per input, after decompression, including blank/comment lines.
+    /// Quoting is not interpreted in the skipped prefix. Defaults to zero.
+    pub fn with_skip_rows(mut self, rows: usize) -> Self {
+        self.skip_rows = rows;
         self
     }
 
@@ -222,9 +232,10 @@ impl SchemaInference for CsvFileFormat {
         &self,
         input: Box<dyn ByteReader>,
     ) -> Result<Option<ResolvedFormat<Self>>> {
+        let input = super::framing::skip_rows(input, self.skip_rows);
         if self.schema.is_some() && self.header != CsvHeader::Auto {
             return Ok(Some(ResolvedFormat {
-                format: self.clone(),
+                format: self.clone().with_skip_rows(0),
                 input,
             }));
         }
@@ -275,7 +286,7 @@ impl ReaderFactory for CsvFileFormat {
     fn prepare(&self, request: &ReadRequest) -> Result<Self::Prepared> {
         let format = self.for_request(request);
         let prepared = format.prepare_scan(request)?;
-        if format.header == CsvHeader::Auto {
+        if format.header == CsvHeader::Auto || format.skip_rows != 0 {
             return Ok(None);
         }
         Ok(prepared.map(|prepared| format.decoder(prepared, request)))

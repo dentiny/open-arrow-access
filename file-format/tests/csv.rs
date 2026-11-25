@@ -840,3 +840,93 @@ async fn all_strings_preserves_spelling_null_columns_and_parallel_projection(
     // One inspection and one scan, with no separate header-only reopen in either.
     assert_eq!(observed.requests.lock().unwrap().len(), 2);
 }
+
+#[rstest::rstest]
+#[tokio::test]
+async fn skip_rows_precedes_header_inference_and_parallel_partitioning(
+    #[values("infer", "explicit", "explicit-present", "custom")] mode: &str,
+    #[values(false, true)] parallel: bool,
+    #[values("\n", "\r\n")] newline: &str,
+    #[values(1, 64)] chunk_size: usize,
+) {
+    // The preamble is not CSV: its unmatched quote must never reach a parser.
+    let input =
+        format!("SET \"unclosed{newline}{newline}id,title{newline}1,\"two\nlines\"{newline}2,last");
+    let bytes = MemoryAccessor::new(input.as_bytes(), chunk_size);
+    let accessor = match mode {
+        "infer" => CsvAccessor::infer(bytes).with_header(CsvHeader::Present),
+        "explicit" => CsvAccessor::new(bytes, schema()).with_dialect(CsvDialect {
+            header: CsvHeader::Auto,
+            validate_header: true,
+            ..Default::default()
+        }),
+        "explicit-present" => CsvAccessor::new(bytes, schema()).with_dialect(CsvDialect {
+            header: CsvHeader::Present,
+            validate_header: true,
+            ..Default::default()
+        }),
+        "custom" => CsvAccessor::new(bytes, schema()).with_format(
+            CsvFormat::default()
+                .with_header(true)
+                .with_header_validation(true),
+        ),
+        _ => unreachable!(),
+    }
+    .with_skip_rows(2)
+    .with_partition_options(DecodePartitionOptions {
+        target_bytes: NonZeroUsize::MIN,
+    });
+    let request = ReadRequest::new("preamble.csv").with_options(options(1, None));
+    let batches = if parallel {
+        collect(
+            &accessor.layer(ParallelReadLayer::new(
+                NonZeroUsize::new(2).unwrap(),
+                NonZeroUsize::MIN,
+            )),
+            request,
+        )
+        .await
+    } else {
+        collect(&accessor, request).await
+    };
+    assert_eq!(collect_values::<Int64Type>(&batches, 0), [1, 2]);
+    let titles = batches
+        .iter()
+        .flat_map(|batch| column::<StringArray>(batch, "title").iter())
+        .collect::<Vec<_>>();
+    assert_eq!(titles, [Some("two\nlines"), Some("last")]);
+}
+
+#[tokio::test]
+async fn skip_rows_runs_after_decompression_and_can_exhaust_input() {
+    use open_arrow_access_decompression::{DecompressionLayer, gzip::Gzip};
+    use std::io::Write;
+    let mut gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    gzip.write_all(b"SET\r\nid,title\r\n1,hello\r\n").unwrap();
+    let compressed = gzip.finish().unwrap();
+    let bytes = MemoryAccessor::new(&compressed, 1).layer(DecompressionLayer::new(Gzip));
+    let accessor = CsvAccessor::infer(bytes).with_skip_rows(1);
+    let batches = collect(&accessor, ReadRequest::new("records.csv.gz")).await;
+    assert_eq!(collect_values::<Int64Type>(&batches, 0), [1]);
+    for count in [1, 2, usize::MAX] {
+        let accessor = CsvAccessor::new(MemoryAccessor::new(b"SET", 1), schema())
+            .with_header(CsvHeader::Absent)
+            .with_skip_rows(count);
+        assert!(
+            collect(&accessor, ReadRequest::new("empty.csv"))
+                .await
+                .is_empty()
+        );
+        let accessor = CsvAccessor::infer(MemoryAccessor::new(b"SET", 1)).with_skip_rows(count);
+        assert!(
+            collect(&accessor, ReadRequest::new("empty.csv"))
+                .await
+                .is_empty()
+        );
+    }
+    let accessor = CsvAccessor::new(MemoryAccessor::new(b"SET\n1,hello", 1), schema())
+        .with_header(CsvHeader::Absent)
+        .with_skip_rows(1);
+    let batches = collect(&accessor, ReadRequest::new("headerless.csv")).await;
+    assert_eq!(collect_values::<Int64Type>(&batches, 0), [1]);
+}

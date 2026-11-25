@@ -1,8 +1,14 @@
 //! Parse source-dialect records into canonical CSV chunks for schema sampling
 //! and independently decoded scan partitions. Neither caller owns CSV framing.
 
-use futures::io::{AsyncReadExt, Cursor};
-use open_arrow_access_core::{ByteReader, Bytes, Result, into_async_read};
+use futures::{
+    TryStreamExt,
+    future::ready,
+    io::{AsyncReadExt, Cursor},
+};
+use open_arrow_access_core::{
+    ByteReader, Bytes, Result, StreamReader, into_async_read, into_stream,
+};
 
 use super::{CsvDialect, CsvHeader, error};
 
@@ -113,4 +119,24 @@ fn reader_builder(dialect: CsvDialect) -> csv_async::AsyncReaderBuilder {
         builder.terminator(csv_async::Terminator::Any(terminator));
     }
     builder
+}
+
+/// Drop LF/CRLF preamble lines before any CSV parsing, without copying chunks.
+pub(super) fn skip_rows(input: Box<dyn ByteReader>, mut rows: usize) -> Box<dyn ByteReader> {
+    if rows == 0 {
+        return input;
+    }
+    let mut metadata = input.metadata().clone();
+    metadata.content_length = None;
+    let chunks = into_stream(input).try_filter_map(move |mut bytes| {
+        while rows != 0 {
+            let Some(end) = bytes.iter().position(|&byte| byte == b'\n') else {
+                return ready(Ok(None));
+            };
+            bytes = bytes.slice(end + 1..);
+            rows -= 1;
+        }
+        ready(Ok((!bytes.is_empty()).then_some(bytes)))
+    });
+    Box::new(StreamReader::bytes(chunks, metadata))
 }

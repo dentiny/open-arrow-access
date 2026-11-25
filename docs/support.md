@@ -157,3 +157,23 @@ operator; they are distinct from this project's accessor layers.
 
 See [source blob fields](blob-fields.md) for the exact annotated payload/URL paths,
 caller-owned schema boundaries and WARC BinaryView sink compatibility.
+
+### CSV preambles
+
+Use `CsvAccessor::with_skip_rows(n)` or `CsvFileFormat::with_skip_rows(n)` to
+skip physical lines before header detection, schema inference and decoding:
+
+```rust,ignore
+let csv = CsvAccessor::infer(bytes)
+    .with_skip_rows(1)
+    .with_header(CsvHeader::Present);
+```
+
+For example, this skips a leading `SET` line and reads the next line as the CSV
+header. The default is zero. LF and CRLF each terminate one physical line;
+blank and comment lines count, and quotes in the skipped prefix are ignored.
+Skipping happens after byte decompression and once per input, before parallel
+partitioning. It does not skip rows independently in each decode partition.
+Skipping to or past EOF produces no rows. Quoted multiline fields after the
+preamble retain ordinary CSV semantics. Bare CR and custom CSV record terminators
+are not supported for the preamble.
