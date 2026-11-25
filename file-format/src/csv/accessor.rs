@@ -19,6 +19,12 @@ impl<B> FileAccessor<B, CsvFileFormat> {
         self.map_format(|format| format.with_compression_factory(factory))
     }
 
+    /// Skip physical lines at the start of each decompressed input, before its header.
+    /// See [`CsvFileFormat::with_skip_rows`] for line and quoting semantics.
+    pub fn with_skip_rows(self, rows: usize) -> Self {
+        self.map_format(|format| format.with_skip_rows(rows))
+    }
+
     pub fn with_inference_options(self, options: CsvInferenceOptions) -> Self {
         self.map_format(|format| format.with_inference_options(options))
     }
