@@ -39,7 +39,7 @@ only raw tables and provenance; old files containing persisted helper views are
 still readable, with query-local views taking precedence.
 
 The implementation uses the bundled Rust DuckDB binding pinned to Git revision
-`dd37440f86101db35c86d8552b2734e1363ce43a`, which uses Arrow 59 and matches the
+`65e8759fd4e83dad443a6e08d0b20314c76c671d`, which uses Arrow 59 and matches the
 public workspace schema. Pinning the revision keeps fresh consumers on this
 binding line. Arrow batches pass directly between the importer/query and the
 public schema; OCR payload bytes remain unchanged.

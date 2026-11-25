@@ -88,7 +88,7 @@ oai = ["format-xml"]
 arrow-cast = { workspace = true, optional = true }
 tempfile.workspace = true
 # Keep DuckDB on its Arrow 59 binding line.
-duckdb = { git = "https://github.com/dentiny/duckdb-rs.git", rev = "dd37440f86101db35c86d8552b2734e1363ce43a", default-features = false, features = [
+duckdb = { git = "https://github.com/duckdb/duckdb-rs.git", rev = "65e8759fd4e83dad443a6e08d0b20314c76c671d", default-features = false, features = [
     "bundled",
     "appender-arrow",
     "parquet",
