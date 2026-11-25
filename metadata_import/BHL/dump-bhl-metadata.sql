@@ -1,6 +1,8 @@
 -- Run with DuckDB v1.5.6 and httpfs enabled, against a NEW database file.
 LOAD httpfs;
 SET preserve_insertion_order = false;
+SET memory_limit = '8GiB';
+SET threads = 2;
 
 -- Gzip is decompressed automatically. Keep every field as VARCHAR;
 -- disable quote parsing and preserve empty strings as empty strings.
@@ -31,12 +33,13 @@ CREATE TABLE doi AS SELECT * FROM bhl_tsv('doi', ['EntityType', 'EntityID', 'DOI
 
 CHECKPOINT;
 
--- Build optional numeric BHL lookup profile after the raw import.
+-- Build numeric BHL lookup profile after the raw import.
 -- Optional immutable BHL lookup profile, version 1.
 -- Run once after all 13 raw tables are finalized. Raw schemas/values are retained.
 -- Additional derived tables and indexes require disk and build memory.
+-- Each table commits before CREATE INDEX, enabling DuckDB bulk index builds.
+-- A failed build can leave partial objects: discard the unpublished output.
 -- Do not update raw tables afterward: rebuild the complete snapshot instead.
-BEGIN TRANSACTION;
 CREATE TEMP MACRO __bhl_lookup_id(value) AS CASE
     WHEN regexp_full_match(value, '[+]?[0-9]+')
     THEN nullif(try_cast(value AS UBIGINT), 0) END;
@@ -106,6 +109,7 @@ SELECT *, rowid::UBIGINT AS __source_rowid, __bhl_lookup_id(EntityID) AS __key
 FROM main.doi ORDER BY __key, __source_rowid;
 CREATE INDEX __bhl_lookup_doi_key ON main.__bhl_lookup_doi (__key);
 
+BEGIN TRANSACTION;
 CREATE TABLE main.__bhl_lookup (version UBIGINT);
 INSERT INTO main.__bhl_lookup VALUES (1);
 COMMIT;
