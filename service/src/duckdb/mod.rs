@@ -27,4 +27,4 @@ pub use ::duckdb::{Params, params};
 pub use query::DuckDbDatabase;
 
 mod parquet_table;
-pub use parquet_table::ParquetOptions;
+pub use parquet_table::{DuckDBParquetTable, ParquetOptions};

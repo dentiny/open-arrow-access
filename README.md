@@ -101,11 +101,12 @@ or create a persistent `.duckdb` file. Query results use the same incremental
 Arrow interface as existing database queries:
 
 ```rust,no_run
-use open_arrow_access::service::duckdb::{CachePolicy, DuckDbDatabase, params};
+use open_arrow_access::service::duckdb::{CachePolicy, DuckDBParquetTable, DuckDbDatabase, params};
 
 fn main() -> open_arrow_access::Result<()> {
     let database = DuckDbDatabase::in_memory(None, CachePolicy::default())?;
-    database.register_parquet("opinions", &["/data/opinions/part-*.parquet"])?;
+    let table = DuckDBParquetTable::new("opinions", &["/data/opinions/part-*.parquet"]);
+    table.register(&database)?;
     database.query(
         "SELECT id, download_url FROM opinions WHERE id >= ? LIMIT 100",
         params![0_i64],
@@ -118,6 +119,9 @@ fn main() -> open_arrow_access::Result<()> {
 }
 ```
 
+`DuckDBParquetTable` exposes its `name`, `paths`, and `options` for caller
+configuration. `DuckDbDatabase::register_parquet` and
+`register_parquet_with_options` remain convenience wrappers around the table object.
 Pass one filename, a list of filenames, or DuckDB-supported local/S3 globs.
 Names are single SQL identifiers in `main`; registration fails if the name
 already exists. Registered views are shared with `try_clone()` and

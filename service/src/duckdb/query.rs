@@ -1,4 +1,4 @@
-use super::{CachePolicy, ManagedConnection, ParquetOptions, error, parquet_table};
+use super::{CachePolicy, DuckDBParquetTable, ManagedConnection, ParquetOptions, error};
 use ::duckdb::{Params, Statement};
 use arrow_array::RecordBatch;
 use arrow_schema::SchemaRef;
@@ -48,7 +48,9 @@ impl DuckDbDatabase {
         paths: &[impl AsRef<str>],
         options: ParquetOptions,
     ) -> Result<()> {
-        parquet_table::register(&self.connection, table, paths, options)
+        let mut table = DuckDBParquetTable::new(table, paths);
+        table.options = options;
+        table.register(self)
     }
 
     /// Open an existing file read-only. A missing file is an error, not a newly
@@ -87,6 +89,10 @@ impl DuckDbDatabase {
         Ok(Self {
             connection: self.connection.try_clone()?,
         })
+    }
+
+    pub(super) fn managed_connection(&self) -> &ManagedConnection {
+        &self.connection
     }
 
     pub(crate) fn into_connection(self) -> ManagedConnection {
