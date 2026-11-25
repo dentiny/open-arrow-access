@@ -54,7 +54,7 @@ pub(super) fn register(
         literals.push(format!("'{}'", path.replace('\'', "''")));
     }
     if remote {
-        connection.configure_parquet_cache()?;
+        connection.configure_remote_cache()?;
     }
     // CREATE VIEW does not support bound file parameters. Quote identifiers and
     // string literals separately, keeping caller paths out of SQL syntax.

@@ -169,8 +169,12 @@ impl<A> ArxivContentRecords<A> {
             }
             ArxivMetadataSource::DuckDbDatabase { location, init_sql } => {
                 let database = tokio::task::spawn_blocking(move || {
-                    crate::duckdb::DuckDbDatabase::connect(&location, init_sql.as_deref())
-                        .map(ArxivMetadataDatabase::new)
+                    crate::duckdb::DuckDbDatabase::connect(
+                        &location,
+                        init_sql.as_deref(),
+                        crate::duckdb::CachePolicy::OnDisk,
+                    )
+                    .map(ArxivMetadataDatabase::new)
                 })
                 .await
                 .map_err(super::error::metadata_worker)??;

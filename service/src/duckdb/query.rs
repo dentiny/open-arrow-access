@@ -1,4 +1,4 @@
-use super::{ManagedConnection, ParquetOptions, error, parquet};
+use super::{CachePolicy, ManagedConnection, ParquetOptions, error, parquet};
 use ::duckdb::{Params, Statement};
 use arrow_array::RecordBatch;
 use arrow_schema::SchemaRef;
@@ -9,7 +9,7 @@ use std::path::Path;
 ///
 /// Existing database files are opened read-only. Opening and querying are synchronous;
 /// use a blocking worker in async applications. Remote reads use cache_httpfs:
-/// attached databases use a private on-disk cache; Parquet uses a bounded memory cache.
+/// the explicit cache policy controls in-memory or private on-disk caching.
 /// No provider-specific schema is required, and query results retain DuckDB's
 /// Arrow types and column names.
 pub struct DuckDbDatabase {
@@ -21,11 +21,11 @@ impl DuckDbDatabase {
     /// Create a writable in-memory catalog without a persistent database file.
     /// Optional trusted initialization SQL can load extensions and create secrets;
     /// failures omit its text, as in [`Self::connect`]. Local Parquet registration
-    /// requires no extension download. HTTP(S)/S3 registration configures the same
-    /// cache_httpfs with a bounded 128 MiB in-memory block cache. Scratch/spill files may use disk.
-    pub fn in_memory(init_sql: Option<&str>) -> Result<Self> {
+    /// requires no extension download. HTTP(S)/S3 registration applies the supplied
+    /// cache_httpfs policy. Scratch/spill files may use disk.
+    pub fn in_memory(init_sql: Option<&str>, cache_policy: CachePolicy) -> Result<Self> {
         Ok(Self {
-            connection: ManagedConnection::in_memory_with_init(init_sql)?,
+            connection: ManagedConnection::in_memory_with_init(init_sql, cache_policy)?,
         })
     }
 
@@ -63,17 +63,21 @@ impl DuckDbDatabase {
     /// Execute the optional trusted SQL string (e.g. LOAD httpfs; CREATE SECRET ...)
     /// before attaching the database. Secrets are temporary unless the script
     /// explicitly requests persistence. cache_httpfs is force-installed from
-    /// community and loaded on each connect; its on-disk cache is always
-    /// configured before ATTACH, including local paths.
-    /// The on-disk cache is always private and temporary, retained until the last
+    /// community and loaded on each connect; the supplied cache policy is applied
+    /// before ATTACH, including local paths.
+    /// An on-disk cache is private and temporary, retained until the last
     /// cloned connection closes. Independent connections use separate directories.
     /// Only requested blocks are fetched, with no full database download during opening.
     /// The caller can load the SQL from any source or construct it in memory.
     /// SQL execution errors omit the SQL text, which may contain credentials.
     /// This is synchronous; use a blocking worker in async applications.
-    pub fn connect(location: &str, init_sql: Option<&str>) -> Result<Self> {
+    pub fn connect(
+        location: &str,
+        init_sql: Option<&str>,
+        cache_policy: CachePolicy,
+    ) -> Result<Self> {
         Ok(Self {
-            connection: ManagedConnection::connect(location, init_sql)?,
+            connection: ManagedConnection::connect(location, init_sql, cache_policy)?,
         })
     }
 
