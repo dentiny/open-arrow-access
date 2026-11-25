@@ -630,8 +630,11 @@ documents: Struct<
 >
 ```
 
-`opinion_file_url` prefers nonempty `opinion.local_path`, falling back to
-nonempty `opinion.download_url`. `cluster_pdf_url` uses
+`opinion_file_url` prefers nonempty downloadable `opinion.local_path`, falling
+back to nonempty `opinion.download_url`. Historical absolute filesystem paths
+(such as `/home/importer/archive/file.xml`) remain in the source fields but use
+the download URL fallback, or a null derived URL when no fallback exists.
+`cluster_pdf_url` uses
 `cluster.filepath_pdf_harvard` only. Absolute HTTP(S) references are preserved
 verbatim, including signed query strings. Raw relative storage keys are appended
 beneath the configured root with URL-encoded path segments; they are not assumed

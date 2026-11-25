@@ -102,6 +102,8 @@ fn attach(batch: RecordBatch, schema: SchemaRef, root: &Url) -> Result<RecordBat
             root,
             struct_string_value(opinion, local, row)
                 .filter(|v| !v.is_empty())
+                // Historical absolute paths refer to the upstream filesystem.
+                .filter(|v| !v.starts_with('/') || v.starts_with("//"))
                 .or_else(|| struct_string_value(opinion, download, row).filter(|v| !v.is_empty())),
         )?);
         cluster_urls.push(resolve(

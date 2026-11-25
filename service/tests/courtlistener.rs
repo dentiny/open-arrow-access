@@ -495,6 +495,50 @@ async fn document_plans_are_lazy_and_invalid_references_fail_without_dropping_ro
     assert!(reader.next().await?.is_none());
     Ok(())
 }
+#[tokio::test]
+async fn historical_local_paths_preserve_rows_and_fall_back_to_download_url() -> Result<()> {
+    let (root, source) = joined_fixture().await;
+    let raw = include_str!("../../testdata/courtlistener/documents/opinion.csv")
+        .replace("pdf/opinion 1.pdf", "/home/importer/archive/original.xml")
+        .replace(
+            "https://mirror.invalid/original.pdf?sig=x%2Fy",
+            "/home/importer/archive/other.xml",
+        );
+    write_bz(root.path(), "opinions", &raw).await;
+    let source = source.with_document_urls("https://media.invalid/")?;
+    let mut reader = source.open(ReadRequest::new("2026-09-30")).await?;
+    let schema = reader.metadata().schema.clone();
+    let mut batches = Vec::new();
+    while let Some(batch) = reader.next().await? {
+        batches.push(batch);
+    }
+    let batch = concat_batches(&schema, &batches).unwrap();
+    assert_eq!(batch.num_rows(), 5);
+    let docs = batch
+        .column_by_name("documents")
+        .unwrap()
+        .as_any()
+        .downcast_ref::<StructArray>()
+        .unwrap();
+    let urls = child::<StringArray>(docs, "opinion_file_url");
+    assert!(urls.is_null(0));
+    assert_eq!(urls.value(2), "https://publisher.invalid/unused.pdf");
+    let opinion = batch
+        .column_by_name("opinion")
+        .unwrap()
+        .as_any()
+        .downcast_ref::<StructArray>()
+        .unwrap();
+    assert_eq!(
+        child::<StringArray>(opinion, "local_path").value(0),
+        "/home/importer/archive/original.xml"
+    );
+    assert_eq!(
+        child::<StringArray>(opinion, "xml_harvard").value(0),
+        "<opinion>XML &amp; text</opinion>"
+    );
+    Ok(())
+}
 fn child<'a, T: Array + 'static>(s: &'a StructArray, name: &str) -> &'a T {
     s.column_by_name(name)
         .unwrap()
