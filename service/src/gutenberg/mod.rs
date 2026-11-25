@@ -3,8 +3,11 @@
 mod books;
 mod error;
 mod metadata;
+mod mirror;
+mod validation;
 pub use books::{GutenbergBookDecoder, GutenbergBooks, book_schema};
 use error::{decode, decode_source};
+pub use mirror::GutenbergMirror;
 
 use std::sync::{Arc, OnceLock};
 

@@ -367,3 +367,32 @@ declarations produce one-element lists. The two lists are independent RDF
 properties, not paired versions. Malformed numeric extents still fail
 decoding even when the file metadata is projected out. Whole-book output also
 retains the exact original RDF and original payload bytes.
+
+## Reading advertised files from a mirror
+
+`GutenbergMirror` wraps caller-configured byte storage and can be passed directly
+into `GutenbergBookDecoder`. Configure the HTTP, object-storage or filesystem
+backend yourself; the adapter owns no credentials or transport configuration.
+
+```rust,ignore
+use open_arrow_access::service::gutenberg::{
+    GutenbergBookDecoder, GutenbergBooks, GutenbergMirror,
+};
+
+// `files` exposes the mirror root; `rdf` reads the catalogue RDF documents.
+let files = GutenbergMirror::new(files, "");
+let books = GutenbergBooks::new(rdf, GutenbergBookDecoder::new(files));
+```
+
+The optional prefix is relative to the wrapped storage root. The combined mirror
+layout must contain the main digit tree and generated files under `cache/epub/`.
+The adapter maps `/files/<id>/...`, `/ebooks/<id>.<format>`, `cache/generated/`
+and `cache/epub/` URLs. Only HTTP(S) URLs on `www.gutenberg.org` or `gutenberg.org`
+are accepted; credentials, queries, fragments, non-default ports and unsafe
+decoded paths are rejected. Unrecognized formats and missing files fail rather
+than dropping representations or falling back to the primary site.
+
+Only byte requests are rewritten. Advertised URIs, RDF and payload bytes remain
+unchanged in book records. Metadata and sequential-open calls are delegated to
+the backend, preserving its ability to avoid eager stat/HEAD requests. The
+adapter disables listing because the URL aliases have no unique reverse mapping.
