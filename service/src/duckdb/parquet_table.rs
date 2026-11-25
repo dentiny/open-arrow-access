@@ -43,8 +43,8 @@ impl DuckDBParquetTable {
             ));
         }
         for path in &self.paths {
-            if path.is_empty() || path.contains('\0') {
-                return Err(invalid("Parquet paths must be nonempty and contain no NUL"));
+            if path.is_empty() {
+                return Err(invalid("Parquet paths must be nonempty"));
             }
         }
         Ok(())
