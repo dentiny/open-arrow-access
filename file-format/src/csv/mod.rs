@@ -8,7 +8,6 @@ mod format;
 mod framing;
 mod inference;
 mod reader;
-mod skip;
 mod validation;
 
 pub use accessor::CsvAccessor;

@@ -170,10 +170,10 @@ let csv = CsvAccessor::infer(bytes)
 ```
 
 For example, this skips a leading `SET` line and reads the next line as the CSV
-header. The default is zero. CR, LF and CRLF each terminate one physical line;
+header. The default is zero. LF and CRLF each terminate one physical line;
 blank and comment lines count, and quotes in the skipped prefix are ignored.
 Skipping happens after byte decompression and once per input, before parallel
 partitioning. It does not skip rows independently in each decode partition.
 Skipping to or past EOF produces no rows. Quoted multiline fields after the
-preamble retain ordinary CSV semantics. This option does not configure custom
-CSV record terminators for the preamble.
+preamble retain ordinary CSV semantics. Bare CR and custom CSV record terminators
+are not supported for the preamble.

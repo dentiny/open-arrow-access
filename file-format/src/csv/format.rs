@@ -95,7 +95,7 @@ impl CsvFileFormat {
         self
     }
 
-    /// Skip physical CR, LF or CRLF lines before header detection and CSV parsing.
+    /// Skip physical LF or CRLF lines before header detection and CSV parsing.
     /// Applied once per input, after decompression, including blank/comment lines.
     /// Quoting is not interpreted in the skipped prefix. Defaults to zero.
     pub fn with_skip_rows(mut self, rows: usize) -> Self {
@@ -232,7 +232,7 @@ impl SchemaInference for CsvFileFormat {
         &self,
         input: Box<dyn ByteReader>,
     ) -> Result<Option<ResolvedFormat<Self>>> {
-        let input = super::skip::skip_rows(input, self.skip_rows);
+        let input = super::framing::skip_rows(input, self.skip_rows);
         if self.schema.is_some() && self.header != CsvHeader::Auto {
             return Ok(Some(ResolvedFormat {
                 format: self.clone().with_skip_rows(0),

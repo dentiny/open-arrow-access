@@ -846,7 +846,7 @@ async fn all_strings_preserves_spelling_null_columns_and_parallel_projection(
 async fn skip_rows_precedes_header_inference_and_parallel_partitioning(
     #[values("infer", "explicit", "explicit-present", "custom")] mode: &str,
     #[values(false, true)] parallel: bool,
-    #[values("\n", "\r", "\r\n")] newline: &str,
+    #[values("\n", "\r\n")] newline: &str,
     #[values(1, 64)] chunk_size: usize,
 ) {
     // The preamble is not CSV: its unmatched quote must never reach a parser.
