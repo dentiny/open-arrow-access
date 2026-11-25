@@ -20,6 +20,12 @@ parsing is disabled. The script also builds the version-1 `__bhl_lookup_*`
 derived tables and indexes. To import only the raw tables, stop after the first
 `CHECKPOINT`, before the optional lookup-profile section. The lookup profile
 requires additional disk space and memory; rebuild it if the raw data changes.
+Raw import preserves source order before lookup tables capture row ordinals.
+The lookup rows are clustered by numeric key and retain lexical values and duplicates.
+Each derived table commits before its ART index is bulk-built; the version marker
+is committed last. A failed build can leave partial objects: discard the unpublished
+file before retrying. The defaults are an 8 GiB DuckDB memory budget and two threads;
+allow additional process memory and disk for sorting.
 The public source URLs are live and do not pin an atomic snapshot.
 
 This standalone SQL does not create the `__bhl_metadata` provenance header

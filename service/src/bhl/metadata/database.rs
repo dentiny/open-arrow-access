@@ -126,6 +126,8 @@ impl BhlMetadata {
     /// disk/memory for the derived tables and indexes. Distribute the completed
     /// immutable file only after this method returns; never modify raw tables
     /// without rebuilding the snapshot and its lookup tables together.
+    /// Tables commit before bulk index construction. A failed build may leave
+    /// partial objects; discard the unpublished file before retrying.
     /// Existing lookup profiles are rejected rather than overwritten. Filesystem
     /// checks are asynchronous; synchronous DuckDB work runs on a blocking worker.
     pub async fn prepare_lookup(path: impl AsRef<Path>) -> Result<()> {

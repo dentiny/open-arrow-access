@@ -17,7 +17,11 @@ Readers automatically use the profile when present. Old raw-table databases
 continue to work without it; malformed or unsupported profiles fail explicitly.
 
 Preparation needs extra disk and build memory for a copy of the source records
-and their indexes. It is transactional and rejects existing lookup objects.
+and their indexes. Each derived table commits before its ART index is built,
+so DuckDB can bulk-build the index without retaining all tables in one transaction.
+Preparation rejects existing lookup objects; a failure can leave partial objects.
+Discard a failed unpublished output before retrying. The version marker is written
+only after all tables and indexes succeed.
 Never update raw tables after preparation: regenerate the complete snapshot and
 profile together. A remote read-only worker does not build indexes or copy tables.
 Index eligibility and benefit depend on the actual query plan and selection size;

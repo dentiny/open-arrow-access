@@ -37,6 +37,32 @@ async fn prepared_lookup_preserves_lexical_values_relation_order_and_read_only_q
 }
 
 #[tokio::test]
+async fn failed_lookup_build_does_not_publish_profile_marker() {
+    let (_directory, path, _) = plain_database().await;
+    // Fail after the first table/index have committed, while building item.
+    update_database(
+        &path,
+        "CREATE INDEX __bhl_lookup_item_key ON main.item (ItemID)",
+    );
+    assert!(BhlMetadata::prepare_lookup(&path).await.is_err());
+    let connection = ::duckdb::Connection::open(&path).unwrap();
+    let markers: u64 = connection
+        .query_row(
+            "SELECT count(*) FROM information_schema.tables WHERE table_name='__bhl_lookup'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(markers, 0);
+    let raw: String = connection
+        .query_row("SELECT TitleID FROM main.title LIMIT 1", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(raw, "001");
+}
+
+#[tokio::test]
 async fn prepared_lookup_rejects_incomplete_or_unknown_profiles_without_fallback() {
     for sql in [
         "UPDATE __bhl_lookup SET version=2",
