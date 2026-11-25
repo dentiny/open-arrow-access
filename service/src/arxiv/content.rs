@@ -172,7 +172,7 @@ impl<A> ArxivContentRecords<A> {
                     crate::duckdb::DuckDbDatabase::connect(
                         &location,
                         init_sql.as_deref(),
-                        crate::duckdb::CachePolicy::OnDisk,
+                        crate::duckdb::CachePolicy::on_disk(),
                     )
                     .map(ArxivMetadataDatabase::new)
                 })

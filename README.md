@@ -131,7 +131,13 @@ The extension is force-installed from community and loaded before binding the
 view. The constructor takes a `CachePolicy`, shared by clones.
 `CachePolicy::default()` selects a 128 MiB memory cache; use
 `CachePolicy::InMemory { block_size, max_blocks }` to configure its capacity, or
-`CachePolicy::OnDisk` for the owned temporary on-disk cache. Registration
+`CachePolicy::on_disk()` for the owned temporary on-disk cache. Use
+`CachePolicy::OnDisk { block_size, max_in_memory_blocks, min_free_disk_bytes }`
+to control the disk-cache block size, its memory read-through capacity, and its
+free-disk eviction threshold. Memory capacity is `block_size * max_in_memory_blocks`;
+zero memory blocks disable the read-through layer. `min_free_disk_bytes = 0`
+retains the extension's default 5% reservation. The threshold reserves free disk
+space; cache_httpfs does not expose a hard maximum cache-directory size. Registration
 preserves this connection policy. Local Parquet support is bundled and needs no
 extension download. Registration can read footers and list matching
 files; queries fetch needed columns/pages. Query intermediates may still spill
@@ -449,7 +455,7 @@ use open_arrow_access::service::duckdb::{CachePolicy, DuckDbDatabase};
 let database = DuckDbDatabase::connect(
     "s3://bucket/metadata.duckdb",
     Some("CREATE SECRET metadata (TYPE s3, PROVIDER credential_chain);"),
-    CachePolicy::OnDisk,
+    CachePolicy::on_disk(),
 )?;
 database.query("SELECT * FROM metadata LIMIT 10", [], |batch| {
     println!("{batch:?}");

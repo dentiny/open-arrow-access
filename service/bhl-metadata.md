@@ -250,7 +250,7 @@ use open_arrow_access_service::duckdb::{CachePolicy, DuckDbDatabase};
 let database = DuckDbDatabase::connect(
     "s3://bucket/BHL-metadata.duckdb",
     Some("CREATE SECRET metadata (TYPE s3, PROVIDER credential_chain);"),
-    CachePolicy::OnDisk,
+    CachePolicy::on_disk(),
 )?;
 let metadata = BhlMetadata::from_tables_database(database, "published-snapshot-id")?;
 ```

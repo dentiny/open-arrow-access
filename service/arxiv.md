@@ -593,7 +593,7 @@ let database = tokio::task::spawn_blocking(|| {
     DuckDbDatabase::connect(
         "s3://pretrain-dataset/arxiv-metadata/arxiv.duckdb",
         Some("CREATE SECRET metadata (TYPE s3, PROVIDER credential_chain);"),
-        CachePolicy::OnDisk,
+        CachePolicy::on_disk(),
     )
 }).await??;
 let metadata = Arc::new(ArxivMetadataDatabase::new(database));

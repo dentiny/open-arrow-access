@@ -38,7 +38,7 @@ impl ManagedConnection {
         Ok(Self {
             connection,
             directory,
-            cache_policy: CachePolicy::OnDisk,
+            cache_policy: CachePolicy::on_disk(),
         })
     }
 
@@ -53,7 +53,7 @@ impl ManagedConnection {
         Ok(Self {
             connection,
             directory,
-            cache_policy: CachePolicy::OnDisk,
+            cache_policy: CachePolicy::on_disk(),
         })
     }
 
@@ -153,7 +153,7 @@ impl ManagedConnection {
         Ok(Self {
             connection,
             directory,
-            cache_policy: CachePolicy::OnDisk,
+            cache_policy: CachePolicy::on_disk(),
         })
     }
 
