@@ -3,7 +3,7 @@
 //! `DuckDbDatabase::connect` executes optional initialization SQL before a read-only
 //! local/remote ATTACH. Remote HTTP/S3 database reads use cache_httpfs with a private
 //! temporary cache selected by the caller. `DuckDbDatabase::in_memory` can register Parquet views;
-//! all remote Parquet reads use cache_httpfs with the caller-selected CachePolicy.
+//! HTTP(S)/S3 Parquet reads use cache_httpfs with the caller-selected CachePolicy.
 //! BHL uses in-memory or caller-owned persistent databases; CourtListener uses a
 //! disposable on-disk database. All modes configure a private spill directory,
 //! disable DuckDB's external memory cache, and retain scratch/cache storage

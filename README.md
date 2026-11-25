@@ -130,10 +130,10 @@ already exists. Registered views are shared with `try_clone()` and
 Use the writable in-memory catalog for registration; `open()` and `connect()`
 keep their existing read-only source behavior.
 
-All remote Parquet registration uses `cache_httpfs`. Supported remote URLs are
-HTTP(S) and S3; other remote schemes are rejected rather than bypassing the cache.
-The extension is force-installed from community and loaded before binding the
-view. The constructor takes a `CachePolicy`, shared by clones.
+Remote Parquet registration configures `cache_httpfs` for HTTP(S)/S3 reads.
+DuckDB and its loaded extensions determine which URL schemes are supported.
+The cache extension is force-installed from community and loaded before binding
+remote views. The constructor takes a `CachePolicy`, shared by clones.
 `CachePolicy::default()` selects a 128 MiB memory cache; use
 `CachePolicy::InMemory { block_size, max_blocks }` to configure its capacity, or
 `CachePolicy::on_disk()` for the owned temporary on-disk cache. Use

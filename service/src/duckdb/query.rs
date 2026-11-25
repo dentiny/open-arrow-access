@@ -34,8 +34,8 @@ impl DuckDbDatabase {
     /// required columns/pages on demand. Registration uses a shared catalog view,
     /// so clones and pooled connections see it, including clones created earlier.
     /// The name is a single identifier in `main`, and existing objects are not replaced.
-    /// Supported remote URLs are HTTP(S)/S3 and always use cache_httpfs;
-    /// other remote schemes return an error. Local files need no extension download.
+    /// HTTP(S)/S3 reads use cache_httpfs. DuckDB determines supported URL schemes.
+    /// Local files need no extension download.
     /// Use [`Self::in_memory`] for a writable catalog; read-only databases reject DDL.
     pub fn register_parquet(&self, table: &str, paths: &[impl AsRef<str>]) -> Result<()> {
         self.register_parquet_with_options(table, paths, ParquetOptions::default())

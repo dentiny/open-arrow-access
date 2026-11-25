@@ -29,7 +29,7 @@ impl DuckDBParquetTable {
         }
     }
 
-    /// Validate the table name, source paths and supported URL schemes before I/O.
+    /// Validate the table name and source paths before I/O.
     pub fn validate(&self) -> Result<()> {
         let invalid = |message| Error::new(ErrorKind::InvalidInput, "duckdb_parquet", message);
         if self.name.is_empty() || self.name.contains('\0') {
@@ -45,15 +45,6 @@ impl DuckDBParquetTable {
         for path in &self.paths {
             if path.is_empty() || path.contains('\0') {
                 return Err(invalid("Parquet paths must be nonempty and contain no NUL"));
-            }
-            if let Some(url) = Self::source_url(path)
-                && !matches!(url.scheme(), "http" | "https" | "s3" | "file")
-            {
-                return Err(Error::new(
-                    ErrorKind::Unsupported,
-                    "duckdb_parquet",
-                    "remote Parquet URLs must use HTTP(S) or S3 through cache_httpfs",
-                ));
             }
         }
         Ok(())

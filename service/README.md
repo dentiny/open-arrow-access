@@ -58,8 +58,9 @@ the registration logic; `register_parquet(name, paths)` is a convenience wrapper
 Both support file lists and local/S3
 globs without importing rows. `register_parquet_with_options` exposes schema
 union and Hive partition settings. Views are shared by cloned and pooled
-connections. All supported remote Parquet URLs (HTTP(S)/S3) use `cache_httpfs`
-with the explicitly supplied `CachePolicy`; local Parquet is bundled. See the
+connections. HTTP(S)/S3 Parquet reads use `cache_httpfs`
+with the explicitly supplied `CachePolicy`; DuckDB determines supported URL
+schemes. Local Parquet is bundled. See the
 [Parquet registration example](../README.md#register-parquet-files-as-duckdb-tables).
 
 ## Example setup
