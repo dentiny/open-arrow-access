@@ -121,8 +121,10 @@ selected directory with bounded I/O concurrency (eight directories by default;
 configure with `with_listing_concurrency(NonZeroUsize)`). This is independent of
 per-object byte-read concurrency. Listing results retain the requested directory
 order even when requests finish out of order. Each listing excludes only its
-known aggregate TXT file. An empty or
-malformed directory fails the complete selection rather than being omitted.
+known aggregate TXT file. A directory containing no per-page OCR is skipped
+with an `EmptyShard` audit event, including aggregate-only directories. If all
+selected directories are empty, the selection fails. Malformed directories and
+listing failures still fail the complete selection.
 Only page keys are collected at this stage, not OCR bodies. One shared metadata
 database and one selection/join stream cover the entire batch; page reads remain
 independent native partitions. Projection, byte options, snapshot provenance and
@@ -369,9 +371,15 @@ are still skipped when a canonical sequence is available.
 
 Multiple keys matching the same canonical page are compared byte for byte,
 including empty and non-UTF-8 payloads. Identical aliases produce one row using
-the first selected key and its original bytes; different payloads or unreadable
-aliases fail the scan. This verification also runs for projections excluding
-`data`; unique pages keep the existing zero-OCR-read projection behavior.
+the first selected key and its original bytes. LF versus CRLF line endings are
+also accepted as equivalent, with a separate `LineEndingDeduplicated` event;
+output bytes are never normalized. Lone CR, whitespace, encoding and other
+content differences remain significant. A genuinely conflicting canonical group
+is quarantined in its entirety with a `ConflictingPayloads` event, allowing other
+healthy pages to continue. If every page is quarantined, the scan fails, including
+when OCR partitions execute concurrently. Unreadable aliases still fail the scan.
+This verification also runs for projections excluding `data`; unique pages keep
+the existing zero-OCR-read projection behavior.
 Parent ItemID conflicts and other required metadata failures remain strict by
 default. The synchronous, metadata-only `BhlMetadata::for_each` still requires
 exactly one canonical match because it cannot verify OCR contents.
@@ -381,8 +389,12 @@ Reconciliation decisions are logged to stderr by default. Attach
 accessor to receive structured `BhlPageReconciliation` events: `Quarantined`
 contains the source object, reason and missing/conflicting metadata diagnostics;
 `Deduplicated` identifies both canonical and duplicate objects after all aliases
-have passed verification. Callback errors stop the scan. Callers needing a
-durable quarantine manifest should persist these events alongside the output;
+have passed verification. `LineEndingDeduplicated` identifies equivalent aliases
+whose original bytes differ only in LF/CRLF. `ConflictingPayloads` identifies the
+canonical object, the first conflicting object and all selected aliases in the
+quarantined group; unread later aliases are not claimed to have been verified.
+`EmptyShard` identifies each skipped directory. Callback errors stop the scan.
+Callers needing a durable quarantine manifest should persist these events alongside the output;
 the accessor does not move or rewrite source objects.
 
 The concrete rights fields are `item.CopyrightStatus`, `RightsStatement`,
