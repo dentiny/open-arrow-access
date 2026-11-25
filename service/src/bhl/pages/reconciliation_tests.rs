@@ -190,3 +190,18 @@ async fn a_missing_duplicate_payload_is_not_silently_deduplicated() {
         .unwrap();
     assert_eq!(reader.next().await.unwrap_err().kind(), ErrorKind::NotFound);
 }
+
+#[tokio::test]
+async fn repeated_identical_object_requests_emit_one_row() {
+    let (_root, pages) = source(&[(CANONICAL, b"same")]).await;
+    let batches = into_stream(
+        pages
+            .open(FileSetRequest::new([CANONICAL, CANONICAL]))
+            .await
+            .unwrap(),
+    )
+    .try_collect::<Vec<_>>()
+    .await
+    .unwrap();
+    assert_eq!(batches.len(), 1);
+}

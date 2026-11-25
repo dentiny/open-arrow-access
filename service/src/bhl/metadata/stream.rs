@@ -1,5 +1,3 @@
-#[cfg(test)]
-use super::BhlPageMetadata;
 use super::{BhlMetadata, BhlPageSelection, error};
 use futures::{
     StreamExt, TryStreamExt,
@@ -25,14 +23,14 @@ pub(super) fn pages(
     .boxed()
 }
 
-struct Query<T> {
-    receiver: mpsc::Receiver<T>,
+struct Query {
+    receiver: mpsc::Receiver<BhlPageSelection>,
     task: Option<JoinHandle<Result<()>>>,
 }
 
-impl<T: Send + 'static> Query<T> {
+impl Query {
     fn start(
-        run: impl FnOnce(&mut dyn FnMut(T) -> Result<()>) -> Result<()> + Send + 'static,
+        run: impl FnOnce(&mut dyn FnMut(BhlPageSelection) -> Result<()>) -> Result<()> + Send + 'static,
     ) -> Self {
         let (sender, receiver) = mpsc::channel(1);
         let task = tokio::task::spawn_blocking(move || {
@@ -51,7 +49,7 @@ impl<T: Send + 'static> Query<T> {
         }
     }
 
-    async fn next(&mut self) -> Result<Option<T>> {
+    async fn next(&mut self) -> Result<Option<BhlPageSelection>> {
         if let Some(page) = self.receiver.recv().await {
             return Ok(Some(page));
         }

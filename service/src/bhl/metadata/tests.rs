@@ -101,7 +101,7 @@ async fn scoped_join_preserves_full_results_for_items_parts_and_missing_targets(
          UNION ALL SELECT 2,'item',20,30,1;"
     ).unwrap();
     let sql = format!(
-        "SELECT count(*), bit_xor(hash(request_id,metadata,missing,conflicts,canonical_id,canonical_matches)) FROM ({})",
+        "SELECT count(*), bit_xor(hash(request_id,metadata,missing,conflicts,canonical_ids)) FROM ({})",
         include_str!("join.sql")
     );
     let checksum = || {
