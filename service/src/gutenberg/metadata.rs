@@ -122,28 +122,8 @@ fn scalar_value<'a>(
     // Empty attributes are values; empty optional element text becomes null.
     let keep_empty = matches!(field.data_type(), DataType::Utf8 | DataType::LargeUtf8)
         && mapping.xml.path().contains('@');
-    let text = if matches!(column.data_type(), DataType::List(_)) {
-        let list = column.as_list::<i32>();
-        let offsets = list.value_offsets();
-        let values = list.values().as_string::<i32>();
-        let mut first = None;
-        let mut conflict = false;
-        for index in offsets[index] as usize..offsets[index + 1] as usize {
-            if let Some(text) = string_value(values, index).filter(|s| !s.is_empty()) {
-                if matches!(field.data_type(), DataType::UInt64) {
-                    number::<u64>(Some(text), name)?;
-                }
-                if let Some(previous) = first {
-                    conflict |= previous != text;
-                } else {
-                    first = Some(text);
-                }
-            }
-        }
-        if conflict { None } else { first }
-    } else {
-        string_value(column.as_string::<i32>(), index).filter(|s| !s.is_empty() || keep_empty)
-    };
+    let text =
+        string_value(column.as_string::<i32>(), index).filter(|s| !s.is_empty() || keep_empty);
     if !field.is_nullable() && text.is_none_or(str::is_empty) {
         return Err(decode(format!("missing {name}")));
     }
