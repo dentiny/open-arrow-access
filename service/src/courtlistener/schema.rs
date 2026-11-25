@@ -90,7 +90,7 @@ impl CourtListenerSchemas {
                 Field::new("other_dates", DataType::Utf8, false),
                 Field::new("cross_reference", DataType::Utf8, false),
                 Field::new("correction", DataType::Utf8, false),
-                Field::new("citation_count", DataType::UInt64, false),
+                Field::new("citation_count", DataType::Int64, false),
                 Field::new("precedential_status", DataType::Utf8, false),
                 Field::new("date_blocked", DataType::Date32, true),
                 Field::new("blocked", DataType::Boolean, false),

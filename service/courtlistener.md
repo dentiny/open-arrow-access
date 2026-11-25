@@ -138,7 +138,8 @@ null output fields. These are the explicit conversion rules:
 | Integer primary/foreign identifiers (`id`, `*_id`) | `Int64` | Widen SQL integer IDs; retain nullable foreign keys and validate referential key types |
 | SQL `smallint` | `Int16` | Preserve signed numeric codes/IDs unless listed as a semantic count below |
 | Other SQL `integer` | `Int32` | Preserve signed category/code values rather than treating all integers as counts |
-| `page_count`, `citation_count`, `scdb_votes_majority`, `scdb_votes_minority`, `view_count`, `ia_upload_failure_count` | `UInt64` | Explicit semantic overrides for nonnegative counts; reject negatives, fractions and overflow |
+| `page_count`, `scdb_votes_majority`, `scdb_votes_minority`, `view_count`, `ia_upload_failure_count` | `UInt64` | Explicit semantic overrides for nonnegative counts; reject negatives, fractions and overflow |
+| `citation_count` | `Int64` | Preserve signed source values: the 2026-09-30 export includes `-1`; do not coerce it to NULL or zero |
 | SQL `double precision` (`court.position`) | `Float64` | Preserve the numeric ordering value; reject non-finite values under this contract |
 | SQL text/varchar | `Utf8` | Preserve text and textual identifiers/codes, including leading zeros; do not guess types from names |
 
@@ -221,7 +222,7 @@ cluster: Struct?<
   other_dates: Utf8
   cross_reference: Utf8
   correction: Utf8
-  citation_count: UInt64
+  citation_count: Int64
   precedential_status: Utf8
   date_blocked: Date32?
   blocked: Boolean

@@ -26,8 +26,10 @@ and the compression_fs INSTALL/LOAD statements.
 
 The SQL reads every source column as text, then INSERT casts into the explicit
 table types and enforces NOT NULL constraints. Backslash quote escaping,
-multiline text, unquoted NULL and quoted empty strings are preserved. Native
-DuckDB cast rules apply; this is not the provider's stricter lexical validator.
+multiline text, unquoted NULL and quoted empty strings are preserved. The signed
+`citation_count` column preserves negative source values (including `-1` in the
+2026-09-30 export). Native DuckDB cast rules apply; this is not the provider's
+stricter lexical validator.
 Sequential CSV reads plus `preserve_insertion_order` retain zero-based logical
 record ordinals in `__courtlistener_ordinal`. The 64 MiB line/buffer limit is
 explicit and may need increasing for larger legitimate records; parse errors

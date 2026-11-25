@@ -89,7 +89,7 @@ CREATE TABLE opinion_clusters (
     "other_dates" VARCHAR NOT NULL,
     "cross_reference" VARCHAR NOT NULL,
     "correction" VARCHAR NOT NULL,
-    "citation_count" UBIGINT NOT NULL,
+    "citation_count" BIGINT NOT NULL,
     "precedential_status" VARCHAR NOT NULL,
     "date_blocked" DATE,
     "blocked" BOOLEAN NOT NULL,
