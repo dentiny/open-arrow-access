@@ -131,8 +131,7 @@ SELECT request_id,
          WHERE i.__key = joined.parent_id AND t.__key IS NULL)
     ) AS missing,
     conflicts,
-    min(request_id) FILTER (WHERE expected_sequences = [sequence]) OVER versions AS canonical_id,
-    (count(*) FILTER (WHERE expected_sequences = [sequence]) OVER versions)::UBIGINT AS canonical_matches
+    list(request_id ORDER BY request_id) FILTER (WHERE expected_sequences = [sequence]) OVER versions AS canonical_ids
 FROM sequences AS joined
 WINDOW versions AS (PARTITION BY entity_type, entity_id, page_id)
 ORDER BY request_id

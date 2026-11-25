@@ -80,6 +80,15 @@ pub struct BhlPageMetadata {
     /// These messages accompany the emitted page; callers decide how to handle them.
     pub conflicts: Vec<String>,
 }
+
+/// One canonical identity plus the selected objects matching its metadata
+/// sequence. Empty objects quarantine this selection; multiple objects require
+/// payload verification by the byte-aware page reader.
+pub(in crate::bhl) struct BhlPageSelection {
+    pub page: BhlPageMetadata,
+    pub objects: Vec<ObjectRef>,
+}
+
 impl BhlMetadata {
     /// Scope the selection once, then emit pages from bounded join batches.
     /// This is synchronous; call from a blocking worker in async applications.
@@ -90,6 +99,21 @@ impl BhlMetadata {
         &self,
         keys: &[ObjectRef],
         emit: impl FnMut(BhlPageMetadata) -> Result<()>,
+    ) -> Result<()> {
+        let mut emit = emit;
+        self.for_each_selection(keys, |selection| {
+            validation::validate_canonical_matches(
+                selection.objects.len() as u64,
+                &selection.page.object,
+            )?;
+            emit(selection.page)
+        })
+    }
+
+    fn for_each_selection(
+        &self,
+        keys: &[ObjectRef],
+        emit: impl FnMut(BhlPageSelection) -> Result<()>,
     ) -> Result<()> {
         let connection = self.query_connection()?;
         join::for_each(&connection, keys, emit)
@@ -113,7 +137,7 @@ impl BhlMetadata {
     pub(in crate::bhl) fn stream(
         self: Arc<Self>,
         keys: Vec<ObjectRef>,
-    ) -> futures::stream::BoxStream<'static, Result<BhlPageMetadata>> {
+    ) -> futures::stream::BoxStream<'static, Result<BhlPageSelection>> {
         stream::pages(self, keys)
     }
 

@@ -1,4 +1,4 @@
-use super::{BhlMetadata, BhlPageMetadata, error};
+use super::{BhlMetadata, BhlPageSelection, error};
 use futures::{
     StreamExt, TryStreamExt,
     stream::{self, BoxStream},
@@ -10,12 +10,12 @@ use tokio::{sync::mpsc, task::JoinHandle};
 pub(super) fn pages(
     metadata: Arc<BhlMetadata>,
     keys: Vec<ObjectRef>,
-) -> BoxStream<'static, Result<BhlPageMetadata>> {
+) -> BoxStream<'static, Result<BhlPageSelection>> {
     // Start only when discovery is polled. DuckDB must never run on the async
     // executor, and slow OCR consumers must not accumulate all joined rows.
     stream::once(async move {
         Ok(stream::try_unfold(
-            Query::start(move |emit| metadata.for_each(&keys, emit)),
+            Query::start(move |emit| metadata.for_each_selection(&keys, emit)),
             |mut query| async move { Ok(query.next().await?.map(|page| (page, query))) },
         ))
     })
@@ -24,13 +24,13 @@ pub(super) fn pages(
 }
 
 struct Query {
-    receiver: mpsc::Receiver<BhlPageMetadata>,
+    receiver: mpsc::Receiver<BhlPageSelection>,
     task: Option<JoinHandle<Result<()>>>,
 }
 
 impl Query {
     fn start(
-        run: impl FnOnce(&mut dyn FnMut(BhlPageMetadata) -> Result<()>) -> Result<()> + Send + 'static,
+        run: impl FnOnce(&mut dyn FnMut(BhlPageSelection) -> Result<()>) -> Result<()> + Send + 'static,
     ) -> Self {
         let (sender, receiver) = mpsc::channel(1);
         let task = tokio::task::spawn_blocking(move || {
@@ -49,7 +49,7 @@ impl Query {
         }
     }
 
-    async fn next(&mut self) -> Result<Option<BhlPageMetadata>> {
+    async fn next(&mut self) -> Result<Option<BhlPageSelection>> {
         if let Some(page) = self.receiver.recv().await {
             return Ok(Some(page));
         }

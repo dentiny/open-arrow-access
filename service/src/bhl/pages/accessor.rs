@@ -1,15 +1,18 @@
 use super::super::{
     BhlPageRecord,
-    metadata::{BhlMetadata, BhlPageMetadata},
+    metadata::{BhlMetadata, BhlPageMetadata, BhlPageSelection},
 };
-use super::{BhlPageIdentity, page_schema};
+use super::{
+    BhlPageIdentity, BhlPageReconciliation, page_schema,
+    reconciliation::{self, ReconciliationReport},
+};
 use crate::FileSetRequest;
 use arrow_array::{RecordBatch, StructArray};
-use futures::{StreamExt, stream};
+use futures::{TryStreamExt, future, stream};
 use open_arrow_access_core::{
-    Accessor, ByteAccessor, ByteReadOptions, ByteReadRequest, Capability, OrderRequirement,
-    RecordCapability, RecordMetadata, RecordReader, Result, ScanPartition, ScanPlan, ScanPlanner,
-    SchemaRef, StreamReader, async_trait, read_object, scan_partition,
+    Accessor, ByteAccessor, ByteReadOptions, Capability, OrderRequirement, RecordCapability,
+    RecordMetadata, RecordReader, Result, ScanPartition, ScanPlan, ScanPlanner, SchemaRef,
+    StreamReader, async_trait, scan_partition,
 };
 use std::{collections::HashMap, sync::Arc};
 
@@ -25,12 +28,14 @@ enum MetadataSource {
 }
 
 /// Read selected OCR pages with caller-supplied or DuckDB-joined metadata.
-/// Projections without `data` skip OCR reads; empty projections keep one row.
+/// Unique pages projected without `data` skip OCR reads. Canonical aliases are
+/// read even for metadata-only projections to verify byte-for-byte equality.
 pub struct BhlPageAccessor<A> {
     storage: Arc<A>,
     snapshot_id: Arc<str>,
     metadata: MetadataSource,
     schema_metadata: HashMap<String, String>,
+    reconciliation_report: ReconciliationReport,
 }
 impl<A> BhlPageAccessor<A> {
     pub fn new(
@@ -47,8 +52,10 @@ impl<A> BhlPageAccessor<A> {
 
     /// Execute one join per request on a blocking worker on first read, then
     /// stream metadata through a bounded queue into independent OCR partitions.
-    /// `report` sees each page's missing/conflicting joins before its OCR read;
+    /// `report` sees each canonical page's missing/conflicting joins before its OCR read;
     /// return an error to stop the scan, or Ok(()) to retain the page.
+    /// Objects without a metadata-authoritative sequence are quarantined before
+    /// this callback. Canonical aliases are emitted once after byte verification.
     pub fn from_metadata(
         storage: A,
         snapshot_id: impl Into<String>,
@@ -76,12 +83,23 @@ impl<A> BhlPageAccessor<A> {
             snapshot_id: snapshot_id.into(),
             metadata,
             schema_metadata: HashMap::new(),
+            reconciliation_report: Arc::new(reconciliation::log_reconciliation),
         })
     }
 
     /// Merge caller provenance into the emitted batch schemas.
     pub fn with_schema_metadata(mut self, metadata: HashMap<String, String>) -> Self {
         self.schema_metadata.extend(metadata);
+        self
+    }
+
+    /// Replace the default stderr audit with a structured reconciliation sink.
+    /// An error from the sink stops the scan; quarantines are never unreported.
+    pub fn with_reconciliation_report(
+        mut self,
+        report: impl Fn(&BhlPageReconciliation) -> Result<()> + Send + Sync + 'static,
+    ) -> Self {
+        self.reconciliation_report = Arc::new(report);
         self
     }
 }
@@ -127,6 +145,7 @@ impl<A: ByteAccessor + 'static> ScanPlanner for BhlPageAccessor<A> {
         let storage = self.storage.clone();
         let snapshot = self.snapshot_id.clone();
         let partition_metadata = output.clone();
+        let reconciliation_report = self.reconciliation_report.clone();
         let partition = move |page| {
             page_partition(
                 storage.clone(),
@@ -134,6 +153,7 @@ impl<A: ByteAccessor + 'static> ScanPlanner for BhlPageAccessor<A> {
                 page,
                 request.byte_options,
                 partition_metadata.clone(),
+                reconciliation_report.clone(),
             )
         };
         let plan = match &self.metadata {
@@ -144,12 +164,15 @@ impl<A: ByteAccessor + 'static> ScanPlanner for BhlPageAccessor<A> {
                     .zip(identities)
                     .map(|(object, identity)| {
                         let metadata = provider(&identity)?;
-                        Ok(BhlPageMetadata {
-                            identity,
-                            object,
-                            metadata,
-                            missing: vec![],
-                            conflicts: vec![],
+                        Ok(BhlPageSelection {
+                            objects: vec![object.clone()],
+                            page: BhlPageMetadata {
+                                identity,
+                                object,
+                                metadata,
+                                missing: vec![],
+                                conflicts: vec![],
+                            },
                         })
                     })
                     .collect::<Result<Vec<_>>>()?;
@@ -157,11 +180,26 @@ impl<A: ByteAccessor + 'static> ScanPlanner for BhlPageAccessor<A> {
             }
             MetadataSource::DuckDb { metadata, report } => {
                 let report = report.clone();
-                let partitions = metadata.clone().stream(request.objects).map(move |page| {
-                    let page = page?;
-                    report(&page)?;
-                    Ok(partition(page))
-                });
+                let reconciliation_report = self.reconciliation_report.clone();
+                let partitions =
+                    metadata
+                        .clone()
+                        .stream(request.objects)
+                        .try_filter_map(move |selection| {
+                            let result = if selection.objects.is_empty() {
+                                let page = selection.page;
+                                reconciliation_report(&BhlPageReconciliation::Quarantined {
+                                    object: page.object,
+                                    reason: "no OCR key matches authoritative SequenceOrder",
+                                    missing: page.missing,
+                                    conflicts: page.conflicts,
+                                })
+                                .map(|()| None)
+                            } else {
+                                report(&selection.page).map(|()| Some(partition(selection)))
+                            };
+                            future::ready(result)
+                        });
                 ScanPlan::from_stream(output, partitions).with_streaming_discovery()
             }
         };
@@ -172,17 +210,19 @@ impl<A: ByteAccessor + 'static> ScanPlanner for BhlPageAccessor<A> {
 fn page_partition<A: ByteAccessor + 'static>(
     storage: Arc<A>,
     snapshot: Arc<str>,
-    page: BhlPageMetadata,
+    selection: BhlPageSelection,
     byte_options: ByteReadOptions,
     metadata: RecordMetadata,
+    report: ReconciliationReport,
 ) -> ScanPartition {
     scan_partition(async move {
         let batches = stream::once(read_page_batch(
             storage,
             snapshot,
-            page,
+            selection,
             byte_options,
             metadata.schema.clone(),
+            report,
         ));
         Ok(StreamReader::records(
             batches,
@@ -195,20 +235,17 @@ fn page_partition<A: ByteAccessor + 'static>(
 async fn read_page_batch<A: ByteAccessor>(
     storage: Arc<A>,
     snapshot: Arc<str>,
-    page: BhlPageMetadata,
+    selection: BhlPageSelection,
     byte_options: ByteReadOptions,
     output_schema: SchemaRef,
+    report: ReconciliationReport,
 ) -> Result<RecordBatch> {
-    let data = if output_schema.field_with_name("data").is_ok() {
-        read_object(
-            storage.as_ref(),
-            ByteReadRequest::new(page.object.clone()).with_options(byte_options),
-            "read_bhl_page",
-        )
-        .await?
+    let data = if output_schema.field_with_name("data").is_ok() || selection.objects.len() > 1 {
+        reconciliation::read_canonical(storage.as_ref(), &selection, byte_options, &report).await?
     } else {
         Default::default()
     };
+    let page = selection.page;
     let source_path = format!(
         "{}{}",
         super::super::OPEN_DATA_BUCKET_URL,

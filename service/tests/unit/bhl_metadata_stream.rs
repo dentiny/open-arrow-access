@@ -2,14 +2,18 @@ use super::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::oneshot;
 
-fn page() -> BhlPageMetadata {
+fn page() -> BhlPageSelection {
     let object = ObjectRef::new("ocr/item-2/item-2-3-5.txt");
-    BhlPageMetadata {
+    let page = crate::bhl::metadata::BhlPageMetadata {
         identity: crate::bhl::BhlPageIdentity::parse(object.locator()).unwrap(),
         object,
         metadata: crate::bhl::page::tests::metadata("title", "rights"),
         missing: vec![],
         conflicts: vec![],
+    };
+    BhlPageSelection {
+        objects: vec![page.object.clone()],
+        page,
     }
 }
 
@@ -26,7 +30,7 @@ async fn delivers_first_page_before_query_finishes_off_the_async_thread() {
     let first = query.next().await;
     // Always release the worker, even if the incremental-read assertion fails.
     release.send(()).unwrap();
-    assert_eq!(first.unwrap().unwrap().identity.page_id, 3);
+    assert_eq!(first.unwrap().unwrap().page.identity.page_id, 3);
     let failure = query.next().await.err().unwrap();
     assert_eq!(failure.to_string(), "bhl_metadata: late query failure");
     assert!(query.next().await.unwrap().is_none());

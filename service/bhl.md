@@ -356,9 +356,34 @@ repeated PageIDs can carry different page types and labels, and all source rows
 are retained without multiplying OCR output. Missing page relationships are
 empty lists. Parent and sequence disagreements are checked against every page
 record. TitleID and PartID source collisions remain validation failures.
-A missing join leaves a singleton child null or a relationship list empty and is recorded in the reconciliation
-report; it never drops the OCR page. A valid empty relationship yields an empty
-list. Failed table acquisition must not be reported as an empty relationship.
+A missing join leaves a singleton child null or a relationship list empty. A
+valid empty optional relationship yields an empty list. Failed table acquisition
+must not be reported as an empty relationship.
+
+The DuckDB-backed `BhlPageAccessor` and `BhlShardAccessor` quarantine selected
+objects when none of their OCR keys matches the metadata-authoritative sequence
+(including pages absent from the metadata snapshot). Their bytes are not read
+and they produce no output row. If every selected object is quarantined, the
+scan fails rather than succeeding with empty output. Existing stale versions
+are still skipped when a canonical sequence is available.
+
+Multiple keys matching the same canonical page are compared byte for byte,
+including empty and non-UTF-8 payloads. Identical aliases produce one row using
+the first selected key and its original bytes; different payloads or unreadable
+aliases fail the scan. This verification also runs for projections excluding
+`data`; unique pages keep the existing zero-OCR-read projection behavior.
+Parent ItemID conflicts and other required metadata failures remain strict by
+default. The synchronous, metadata-only `BhlMetadata::for_each` still requires
+exactly one canonical match because it cannot verify OCR contents.
+
+Reconciliation decisions are logged to stderr by default. Attach
+`.with_reconciliation_report(|event| { /* persist event */ Ok(()) })` to either
+accessor to receive structured `BhlPageReconciliation` events: `Quarantined`
+contains the source object, reason and missing/conflicting metadata diagnostics;
+`Deduplicated` identifies both canonical and duplicate objects after all aliases
+have passed verification. Callback errors stop the scan. Callers needing a
+durable quarantine manifest should persist these events alongside the output;
+the accessor does not move or rewrite source objects.
 
 The concrete rights fields are `item.CopyrightStatus`, `RightsStatement`,
 `LicenseType`, `RightsHolder`, plus `part.RightsStatus`,

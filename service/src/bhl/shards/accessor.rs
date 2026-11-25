@@ -10,9 +10,10 @@ use super::{BhlShardReadRequest, validation};
 use crate::{
     FileSetRequest,
     bhl::{
-        BhlOpenData, BhlPageAccessor, BhlPageIdentity, error,
+        BhlOpenData, BhlPageAccessor, BhlPageIdentity, BhlPageReconciliation, error,
         metadata::{BhlMetadata, BhlPageMetadata},
         page_schema,
+        pages::reconciliation::{self, ReconciliationReport},
     },
 };
 
@@ -22,7 +23,9 @@ type MetadataReport = dyn Fn(&BhlPageMetadata) -> Result<()> + Send + Sync;
 ///
 /// Listing is scoped to each requested directory and consumes all listing pages.
 /// Only each directory's aggregate TXT object is excluded. Malformed identities,
-/// empty selections and missing/conflicting metadata fail by default.
+/// empty selections and conflicting metadata fail by default. Objects without
+/// a metadata-authoritative sequence are quarantined; byte-identical canonical
+/// aliases are deduplicated by the page reader.
 ///
 /// Implements the native scan planner: pass this accessor directly to
 /// `CrawlAccessor::new`. The existing page planner retains projection pushdown,
@@ -32,6 +35,7 @@ pub struct BhlShardAccessor<A> {
     metadata: Arc<BhlMetadata>,
     snapshot_id: String,
     report: Arc<MetadataReport>,
+    reconciliation_report: ReconciliationReport,
 }
 
 impl<A> Clone for BhlShardAccessor<A> {
@@ -41,6 +45,7 @@ impl<A> Clone for BhlShardAccessor<A> {
             metadata: self.metadata.clone(),
             snapshot_id: self.snapshot_id.clone(),
             report: self.report.clone(),
+            reconciliation_report: self.reconciliation_report.clone(),
         }
     }
 }
@@ -61,6 +66,7 @@ impl<A: ByteAccessor + 'static> BhlShardAccessor<A> {
             metadata,
             snapshot_id,
             report: Arc::new(error::require_page_metadata),
+            reconciliation_report: Arc::new(reconciliation::log_reconciliation),
         })
     }
 
@@ -102,13 +108,24 @@ impl<A: ByteAccessor + 'static> BhlShardAccessor<A> {
         Ok(self)
     }
 
-    /// Replace strict reconciliation with a caller policy, called for every page
-    /// before its OCR read or emission. Ok retains it; an error stops the scan.
+    /// Replace strict metadata validation for each canonical page, before its
+    /// OCR read or emission. Ok retains it; an error stops the scan. Quarantine
+    /// and byte verification are independent of this policy.
     pub fn with_report(
         mut self,
         report: impl Fn(&BhlPageMetadata) -> Result<()> + Send + Sync + 'static,
     ) -> Self {
         self.report = Arc::new(report);
+        self
+    }
+
+    /// Receive structured quarantine and content-verified deduplication events.
+    /// By default events are written to stderr. Sink errors stop the scan.
+    pub fn with_reconciliation_report(
+        mut self,
+        report: impl Fn(&BhlPageReconciliation) -> Result<()> + Send + Sync + 'static,
+    ) -> Self {
+        self.reconciliation_report = Arc::new(report);
         self
     }
 
@@ -184,12 +201,14 @@ impl<A: ByteAccessor + 'static> ScanPlanner for BhlShardAccessor<A> {
         // One selection table/join worker for the complete directory batch.
         // Only keys are collected here; OCR bodies remain independent partitions.
         let report = self.report.clone();
+        let reconciliation_report = self.reconciliation_report.clone();
         let pages = BhlPageAccessor::from_metadata(
             self.storage.clone(),
             self.snapshot_id.clone(),
             self.metadata.clone(),
             move |page| report(page),
-        )?;
+        )?
+        .with_reconciliation_report(move |event| reconciliation_report(event));
         pages
             .plan_scan(
                 FileSetRequest::new(keys)

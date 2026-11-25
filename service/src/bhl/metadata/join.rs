@@ -1,12 +1,11 @@
-use super::{BhlPageMetadata, error, validation};
+use super::{BhlPageMetadata, BhlPageSelection, error};
 use crate::bhl::{BhlPageIdentity, page_schema};
 use arrow_array::{Array, ArrayRef, ListArray, RecordBatch, StringArray, StructArray, UInt64Array};
 use open_arrow_access_core::{ObjectRef, Result};
 use std::sync::Arc;
 
 const SELECTION_BATCH_SIZE: usize = 8192;
-const CANONICAL_ID_COLUMN: usize = 4;
-const CANONICAL_MATCHES_COLUMN: usize = 5;
+const CANONICAL_IDS_COLUMN: usize = 4;
 
 fn strings(column: &dyn Array, row: usize) -> Result<Vec<String>> {
     let list = column
@@ -31,7 +30,7 @@ fn strings(column: &dyn Array, row: usize) -> Result<Vec<String>> {
 pub(super) fn for_each(
     connection: &::duckdb::Connection,
     keys: &[ObjectRef],
-    mut emit: impl FnMut(BhlPageMetadata) -> Result<()>,
+    mut emit: impl FnMut(BhlPageSelection) -> Result<()>,
 ) -> Result<()> {
     if keys.is_empty() {
         return Ok(());
@@ -104,6 +103,7 @@ pub(super) fn for_each(
         .execute_batch("ALTER TABLE bhl_selection RENAME TO bhl_all_selection")
         .map_err(error::duckdb)?;
     let mut joined_rows = 0;
+    let mut canonical_pages = 0;
     for start in (0..keys.len()).step_by(SELECTION_BATCH_SIZE) {
         let end = start.saturating_add(SELECTION_BATCH_SIZE).min(keys.len());
         connection
@@ -124,16 +124,11 @@ pub(super) fn for_each(
                 .as_any()
                 .downcast_ref::<UInt64Array>()
                 .ok_or_else(|| error::invalid("expected request IDs"))?;
-            let matches = batch
-                .column(CANONICAL_MATCHES_COLUMN)
+            let candidates = batch
+                .column(CANONICAL_IDS_COLUMN)
                 .as_any()
-                .downcast_ref::<UInt64Array>()
-                .ok_or_else(|| error::invalid("expected canonical match counts"))?;
-            let selected = batch
-                .column(CANONICAL_ID_COLUMN)
-                .as_any()
-                .downcast_ref::<UInt64Array>()
-                .ok_or_else(|| error::invalid("expected canonical request IDs"))?;
+                .downcast_ref::<ListArray>()
+                .ok_or_else(|| error::invalid("expected canonical request lists"))?;
             // Enforce the fixed LargeUtf8/non-null contract on joined records only;
             // NULL cells in unrelated source rows must not fail this query.
             let metadata =
@@ -154,28 +149,67 @@ pub(super) fn for_each(
                 let object = keys
                     .get(index)
                     .ok_or_else(|| error::invalid("unknown request ID"))?;
-                validation::validate_canonical_matches(matches.value(row), object)?;
-                if selected.value(row) != indices.value(row) {
-                    let canonical = &keys[selected.value(row) as usize];
-                    eprintln!(
-                        "BHL quarantined alternative {}: selected {}",
-                        object.locator(),
-                        canonical.locator()
-                    );
-                    continue;
+                let values = candidates.value(row);
+                let ids = values
+                    .as_any()
+                    .downcast_ref::<UInt64Array>()
+                    .ok_or_else(|| error::invalid("expected canonical request IDs"))?;
+                if let Some(canonical_id) = ids.iter().next().flatten() {
+                    let canonical_index = usize::try_from(canonical_id)
+                        .map_err(|_| error::invalid("canonical request ID overflow"))?;
+                    let canonical = keys
+                        .get(canonical_index)
+                        .ok_or_else(|| error::invalid("unknown canonical request ID"))?;
+                    if canonical_index != index {
+                        // Aliases are verified/reported by their canonical page.
+                        // Stale sequence versions retain the existing skip policy.
+                        if parsed_identities[canonical_index].sequence
+                            != parsed_identities[index].sequence
+                        {
+                            eprintln!(
+                                "BHL quarantined alternative {}: selected {}",
+                                object.locator(),
+                                canonical.locator()
+                            );
+                        }
+                        continue;
+                    }
+                    canonical_pages += 1;
                 }
-                emit(BhlPageMetadata {
-                    identity: parsed_identities[index].clone(),
-                    object: object.clone(),
-                    metadata: metadata.slice(row, 1),
-                    missing: strings(batch.column(2).as_ref(), row)?,
-                    conflicts: strings(batch.column(3).as_ref(), row)?,
+                let objects = ids
+                    .iter()
+                    .map(|id| {
+                        let id = usize::try_from(
+                            id.ok_or_else(|| error::invalid("null canonical request ID"))?,
+                        )
+                        .map_err(|_| error::invalid("canonical request ID overflow"))?;
+                        keys.get(id)
+                            .cloned()
+                            .ok_or_else(|| error::invalid("unknown canonical request ID"))
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                emit(BhlPageSelection {
+                    page: BhlPageMetadata {
+                        identity: parsed_identities[index].clone(),
+                        object: object.clone(),
+                        metadata: metadata.slice(row, 1),
+                        missing: strings(batch.column(2).as_ref(), row)?,
+                        conflicts: strings(batch.column(3).as_ref(), row)?,
+                    },
+                    objects,
                 })?;
             }
         }
     }
     if joined_rows != keys.len() {
         return Err(error::invalid("unexpected joined page count"));
+    }
+    if canonical_pages == 0 {
+        return Err(error::invalid(format!(
+            "no OCR page matches authoritative SequenceOrder; all {} selected objects quarantined",
+            keys.len()
+        ))
+        .with_object(keys.first()));
     }
     Ok(())
 }
