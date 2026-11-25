@@ -88,10 +88,85 @@ returned through the shared error type. Opening and querying are synchronous;
 run them in a blocking worker when using an async runtime. No provider-specific
 schema validation is performed.
 
-For HTTP and S3 URLs, use `DuckDbDatabase::connect(location, init_sql)`.
+For HTTP and S3 URLs, use `DuckDbDatabase::connect(location, init_sql, cache_policy)`.
 DuckDB attaches the database read-only and `cache_httpfs` fetches requested blocks
 into a private temporary on-disk cache. Opening does not first download the entire
 database. See [remote access and secrets](#duckdb-native-remote-access-and-secrets).
+
+## Register Parquet files as DuckDB tables
+
+Create an in-memory catalog and register external Parquet files as named views.
+The files remain the source of the data; registration does not import their rows
+or create a persistent `.duckdb` file. Query results use the same incremental
+Arrow interface as existing database queries:
+
+```rust,no_run
+use open_arrow_access::service::duckdb::{CachePolicy, DuckDBParquetTable, DuckDbDatabase, params};
+
+fn main() -> open_arrow_access::Result<()> {
+    let database = DuckDbDatabase::in_memory(None, CachePolicy::default())?;
+    let table = DuckDBParquetTable::new("opinions", &["/data/opinions/part-*.parquet"]);
+    table.register(&database)?;
+    database.query(
+        "SELECT id, download_url FROM opinions WHERE id >= ? LIMIT 100",
+        params![0_i64],
+        |batch| {
+            println!("{} rows", batch.num_rows());
+            Ok(())
+        },
+    )?;
+    Ok(())
+}
+```
+
+`DuckDBParquetTable` exposes its `name`, `paths`, and `options` for caller
+configuration. Its public `validate()` checks parameters before I/O; `register()`
+always invokes it before registration. `DuckDbDatabase::register_parquet` and
+`register_parquet_with_options` remain convenience wrappers around the table object.
+Pass one filename, a list of filenames, or DuckDB-supported local/S3 globs.
+Names are single SQL identifiers in `main`; registration fails if the name
+already exists. Registered views are shared with `try_clone()` and
+`DuckDbConnectionPool`, including connections created before registration.
+Use the writable in-memory catalog for registration; `open()` and `connect()`
+keep their existing read-only source behavior.
+
+Remote Parquet registration configures `cache_httpfs` for HTTP(S)/S3 reads.
+DuckDB and its loaded extensions determine which URL schemes are supported.
+The cache extension is force-installed from community and loaded before binding
+remote views. The constructor takes a `CachePolicy`, shared by clones.
+`CachePolicy::default()` selects a 128 MiB memory cache; use
+`CachePolicy::InMemory { block_size, max_blocks }` to configure its capacity, or
+`CachePolicy::on_disk()` for the owned temporary on-disk cache. Use
+`CachePolicy::OnDisk { directory, block_size, max_in_memory_blocks, min_free_disk_bytes }`
+to control the cache directory, the block size, its memory read-through capacity, and its
+free-disk eviction threshold. Memory capacity is `block_size * max_in_memory_blocks`;
+zero memory blocks disable the read-through layer. `min_free_disk_bytes = 0`
+retains the extension's default 5% reservation. The threshold reserves free disk
+space; cache_httpfs does not expose a hard maximum cache-directory size. `directory: None` uses the connection-owned temporary directory.
+Set `directory: Some(PathBuf::from("/data/cache"))` to use a caller-owned directory,
+which persists after connections close. Registration preserves this connection policy. `CachePolicy::validate()` is also public;
+connection constructors validate the policy automatically. Local Parquet support is bundled and needs no
+extension download. Registration can read footers and list matching
+files; queries fetch needed columns/pages. Query intermediates may still spill
+to the owned temporary directory.
+
+For OCI, use its S3-compatible endpoint in initialization SQL and register
+`s3://bucket/prefix/*.parquet`. Authentication uses DuckDB secrets, as described
+under [remote access and secrets](#duckdb-native-remote-access-and-secrets):
+
+```rust,ignore
+let init_sql = std::fs::read_to_string("/run/secrets/duckdb.sql")?;
+let database = DuckDbDatabase::in_memory(Some(&init_sql), CachePolicy::default())?;
+database.register_parquet("opinions", &[
+    "s3://bucket/courtlistener/2026-09-30/opinions/*.parquet",
+])?;
+```
+
+Defaults require compatible file schemas and disable inferred Hive partition
+columns. Use `register_parquet_with_options` and
+`ParquetOptions { union_by_name: true, hive_partitioning: false }` to combine
+files by column name and fill unavailable columns with NULL. Enable
+`hive_partitioning` explicitly to expose `key=value` directory components.
 
 ## Reusable file sources
 
@@ -385,18 +460,19 @@ through `CrawlOptions`; caller-bound storage retains HTTP, retry and I/O policy.
 
 ### DuckDB-native remote access and secrets
 
-`DuckDbDatabase::connect(location, init_sql)` accepts a local path or a
+`DuckDbDatabase::connect(location, init_sql, cache_policy)` accepts a local path or a
 DuckDB-supported URL. It creates an in-memory control connection, executes the
 optional trusted SQL string, always configures cache_httpfs, then attaches
 the source read-only and selects it as the default database. Run this synchronous
 API on a blocking worker in async apps.
 
 ```rust,ignore
-use open_arrow_access::service::duckdb::DuckDbDatabase;
+use open_arrow_access::service::duckdb::{CachePolicy, DuckDbDatabase};
 
 let database = DuckDbDatabase::connect(
     "s3://bucket/metadata.duckdb",
     Some("CREATE SECRET metadata (TYPE s3, PROVIDER credential_chain);"),
+    CachePolicy::on_disk(),
 )?;
 database.query("SELECT * FROM metadata LIMIT 10", [], |batch| {
     println!("{batch:?}");
@@ -421,11 +497,10 @@ For an authenticated HTTP endpoint, use DuckDB's `TYPE http` secret with
 including for local paths. Script errors are redacted to avoid including credentials in error messages. Secrets
 remain temporary unless the script explicitly uses `CREATE PERSISTENT SECRET`.
 Cloned connections share secrets, the selected search path and cached remote
-blocks. Shared temporary storage contains separate `http-cache/` and `spill/`
-subdirectories; the final connection release removes both. The shared loader
-sets `cache_httpfs_type='on_disk'` and `cache_httpfs_cache_directory` before
-ATTACH. It clears the advanced multi-directory override so cached data stays
-inside the owned temporary directory. There is no full-download fallback.
+blocks. Scratch and default cache directories are removed when the final
+connection closes; an explicitly configured cache directory remains caller-owned.
+The shared loader applies `CachePolicy`, including its single disk-cache
+directory, before ATTACH. There is no full-download fallback.
 A query that scans most of a database can still fetch most blocks on demand.
 The attached source is read-only; the control database and connection-local
 temporary objects remain writable. BHL consumes the same loader through

@@ -1,5 +1,5 @@
 //! Keep scratch storage alive for every DuckDB connection, including import workers.
-use super::error;
+use super::{CachePolicy, error};
 use ::duckdb::{Config, Connection};
 use open_arrow_access_core::Result;
 use std::{ops::Deref, path::Path, sync::Arc};
@@ -15,6 +15,7 @@ pub(crate) struct ManagedConnection {
     // Fields drop in declaration order: close DuckDB before removing its files.
     connection: Connection,
     directory: Arc<tempfile::TempDir>,
+    cache_policy: CachePolicy,
 }
 
 impl ManagedConnection {
@@ -37,6 +38,7 @@ impl ManagedConnection {
         Ok(Self {
             connection,
             directory,
+            cache_policy: CachePolicy::on_disk(),
         })
     }
 
@@ -51,19 +53,18 @@ impl ManagedConnection {
         Ok(Self {
             connection,
             directory,
+            cache_policy: CachePolicy::on_disk(),
         })
     }
 
     /// Initialize secrets before attaching an existing local or remote database.
     /// The script is trusted caller SQL, executed once per database instance.
-    pub(crate) fn connect(location: &str, init_sql: Option<&str>) -> Result<Self> {
-        let connection = Self::in_memory()?;
-        if let Some(sql) = init_sql {
-            // DuckDB errors may echo SQL containing credentials; do not retain them.
-            connection
-                .execute_batch(sql)
-                .map_err(|_| error::init_setup())?;
-        }
+    pub(crate) fn connect(
+        location: &str,
+        init_sql: Option<&str>,
+        cache_policy: CachePolicy,
+    ) -> Result<Self> {
+        let connection = Self::in_memory_with_init(init_sql, cache_policy)?;
         connection.configure_remote_cache()?;
         let location = location.replace('\'', "''");
         connection
@@ -74,19 +75,37 @@ impl ManagedConnection {
         Ok(connection)
     }
 
-    /// The same scratch owner keeps spill files and cached remote blocks alive
-    /// until the final cloned connection closes. No full database copy is made.
-    fn configure_remote_cache(&self) -> Result<()> {
-        let cache = self.directory.path().join("http-cache");
-        std::fs::create_dir_all(&cache).map_err(error::scratch)?;
+    pub(crate) fn in_memory_with_init(
+        init_sql: Option<&str>,
+        cache_policy: CachePolicy,
+    ) -> Result<Self> {
+        cache_policy.validate()?;
+        let mut connection = Self::in_memory()?;
+        connection.cache_policy = cache_policy;
+        if let Some(sql) = init_sql {
+            // DuckDB errors may echo SQL containing credentials; do not retain them.
+            connection
+                .execute_batch(sql)
+                .map_err(|_| error::init_setup())?;
+        }
+        Ok(connection)
+    }
+
+    /// Scratch storage is retained by clones. A caller-configured cache directory
+    /// is not removed on close. No full database copy is made.
+    pub(crate) fn configure_remote_cache(&self) -> Result<()> {
+        let default_directory = self.directory.path().join("http-cache");
+        if let CachePolicy::OnDisk { directory, .. } = &self.cache_policy {
+            std::fs::create_dir_all(directory.as_deref().unwrap_or(&default_directory))
+                .map_err(error::scratch)?;
+        }
+        // The policy owns all cache settings, including directory selection.
+        let policy = self.cache_policy.sql(&default_directory)?;
         self.connection
             .execute_batch(&format!(
                 "FORCE INSTALL cache_httpfs FROM community;
                  LOAD cache_httpfs;
-                 SET cache_httpfs_type = 'on_disk';
-                 SET cache_httpfs_cache_directories_config = '';
-                 SET cache_httpfs_cache_directory = '{}';",
-                cache.to_string_lossy().replace('\'', "''")
+                 {policy}"
             ))
             .map_err(error::cache_setup)
     }
@@ -131,6 +150,7 @@ impl ManagedConnection {
         Ok(Self {
             connection,
             directory,
+            cache_policy: CachePolicy::on_disk(),
         })
     }
 
@@ -153,6 +173,7 @@ impl ManagedConnection {
         Ok(Self {
             connection,
             directory: self.directory.clone(),
+            cache_policy: self.cache_policy.clone(),
         })
     }
 

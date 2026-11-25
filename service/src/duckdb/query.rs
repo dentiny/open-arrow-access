@@ -1,15 +1,15 @@
-use super::{ManagedConnection, error};
+use super::{CachePolicy, DuckDBParquetTable, ManagedConnection, ParquetOptions, error};
 use ::duckdb::{Params, Statement};
 use arrow_array::RecordBatch;
 use arrow_schema::SchemaRef;
 use open_arrow_access_core::Result;
 use std::path::Path;
 
-/// Query a local or remote DuckDB file, including provider metadata databases.
+/// Query a DuckDB file or an in-memory catalog of external Parquet tables.
 ///
-/// The database is opened read-only. Opening and querying are synchronous;
-/// use a blocking worker in async applications. Remote reads use cache_httpfs
-/// with a private temporary on-disk block cache.
+/// Existing database files are opened read-only. Opening and querying are synchronous;
+/// use a blocking worker in async applications. Remote reads use cache_httpfs:
+/// the explicit cache policy controls in-memory or private on-disk caching.
 /// No provider-specific schema is required, and query results retain DuckDB's
 /// Arrow types and column names.
 pub struct DuckDbDatabase {
@@ -18,6 +18,41 @@ pub struct DuckDbDatabase {
 }
 
 impl DuckDbDatabase {
+    /// Create a writable in-memory catalog without a persistent database file.
+    /// Optional trusted initialization SQL can load extensions and create secrets;
+    /// failures omit its text, as in [`Self::connect`]. Local Parquet registration
+    /// requires no extension download. HTTP(S)/S3 registration applies the supplied
+    /// cache_httpfs policy. Scratch/spill files may use disk.
+    pub fn in_memory(init_sql: Option<&str>, cache_policy: CachePolicy) -> Result<Self> {
+        Ok(Self {
+            connection: ManagedConnection::in_memory_with_init(init_sql, cache_policy)?,
+        })
+    }
+
+    /// Register Parquet files or DuckDB-supported globs as one named SQL view.
+    /// No rows are copied into DuckDB. Binding reads file metadata; queries read
+    /// required columns/pages on demand. Registration uses a shared catalog view,
+    /// so clones and pooled connections see it, including clones created earlier.
+    /// The name is a single identifier in `main`, and existing objects are not replaced.
+    /// HTTP(S)/S3 reads use cache_httpfs. DuckDB determines supported URL schemes.
+    /// Local files need no extension download.
+    /// Use [`Self::in_memory`] for a writable catalog; read-only databases reject DDL.
+    pub fn register_parquet(&self, table: &str, paths: &[impl AsRef<str>]) -> Result<()> {
+        self.register_parquet_with_options(table, paths, ParquetOptions::default())
+    }
+
+    /// Register Parquet with explicit schema-union and Hive partition options.
+    pub fn register_parquet_with_options(
+        &self,
+        table: &str,
+        paths: &[impl AsRef<str>],
+        options: ParquetOptions,
+    ) -> Result<()> {
+        let mut table = DuckDBParquetTable::new(table, paths);
+        table.options = options;
+        table.register(self)
+    }
+
     /// Open an existing file read-only. A missing file is an error, not a newly
     /// created empty database. Paths are passed directly to DuckDB, never SQL.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
@@ -30,17 +65,21 @@ impl DuckDbDatabase {
     /// Execute the optional trusted SQL string (e.g. LOAD httpfs; CREATE SECRET ...)
     /// before attaching the database. Secrets are temporary unless the script
     /// explicitly requests persistence. cache_httpfs is force-installed from
-    /// community and loaded on each connect; its on-disk cache is always
-    /// configured before ATTACH, including local paths.
-    /// The on-disk cache is always private and temporary, retained until the last
-    /// cloned connection closes. Independent connections use separate directories.
+    /// community and loaded on each connect; the supplied cache policy is applied
+    /// before ATTACH, including local paths.
+    /// An on-disk cache uses a caller-supplied directory or an owned temporary
+    /// directory retained until the last cloned connection closes.
     /// Only requested blocks are fetched, with no full database download during opening.
     /// The caller can load the SQL from any source or construct it in memory.
     /// SQL execution errors omit the SQL text, which may contain credentials.
     /// This is synchronous; use a blocking worker in async applications.
-    pub fn connect(location: &str, init_sql: Option<&str>) -> Result<Self> {
+    pub fn connect(
+        location: &str,
+        init_sql: Option<&str>,
+        cache_policy: CachePolicy,
+    ) -> Result<Self> {
         Ok(Self {
-            connection: ManagedConnection::connect(location, init_sql)?,
+            connection: ManagedConnection::connect(location, init_sql, cache_policy)?,
         })
     }
 
@@ -50,6 +89,10 @@ impl DuckDbDatabase {
         Ok(Self {
             connection: self.connection.try_clone()?,
         })
+    }
+
+    pub(super) fn managed_connection(&self) -> &ManagedConnection {
+        &self.connection
     }
 
     pub(crate) fn into_connection(self) -> ManagedConnection {

@@ -245,11 +245,12 @@ retain their existing provenance and validation.
 BHL reuses the shared DuckDB loader for local paths and remote URLs. For example, open an authenticated remote database:
 
 ```rust,ignore
-use open_arrow_access_service::duckdb::DuckDbDatabase;
+use open_arrow_access_service::duckdb::{CachePolicy, DuckDbDatabase};
 
 let database = DuckDbDatabase::connect(
     "s3://bucket/BHL-metadata.duckdb",
     Some("CREATE SECRET metadata (TYPE s3, PROVIDER credential_chain);"),
+    CachePolicy::on_disk(),
 )?;
 let metadata = BhlMetadata::from_tables_database(database, "published-snapshot-id")?;
 ```

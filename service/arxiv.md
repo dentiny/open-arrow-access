@@ -585,7 +585,7 @@ For an already-open DuckDB snapshot, callers can still supply a shared connectio
 and query metadata by normalized `article_id` using its index:
 
 ```rust
-use open_arrow_access::service::{arxiv::ArxivMetadataDatabase, duckdb::DuckDbDatabase};
+use open_arrow_access::service::{arxiv::ArxivMetadataDatabase, duckdb::{CachePolicy, DuckDbDatabase}};
 use std::sync::Arc;
 
 // Run blocking connection setup outside async runtime workers.
@@ -593,6 +593,7 @@ let database = tokio::task::spawn_blocking(|| {
     DuckDbDatabase::connect(
         "s3://pretrain-dataset/arxiv-metadata/arxiv.duckdb",
         Some("CREATE SECRET metadata (TYPE s3, PROVIDER credential_chain);"),
+        CachePolicy::on_disk(),
     )
 }).await??;
 let metadata = Arc::new(ArxivMetadataDatabase::new(database));
