@@ -3,7 +3,7 @@ use std::io::Read;
 use arrow_schema::{ArrowError, Schema};
 use regex::Regex;
 
-/// Arrow CSV options with header validation retained on Arrow 58.
+/// Arrow CSV options with header validation retained on Arrow 59.
 #[derive(Clone, Debug, Default)]
 pub struct CsvFormat {
     pub(super) inner: arrow_csv::reader::Format,

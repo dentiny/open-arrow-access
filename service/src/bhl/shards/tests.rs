@@ -310,12 +310,13 @@ async fn empty_directory_audit_is_required_and_aggregate_is_never_read_as_a_page
     let batches = read(&source, request.clone()).await.unwrap();
     assert_eq!(batches.len(), 1);
     assert_eq!(batches[0]["data"].as_binary::<i64>().value(0), b"valid");
-    let events = events.lock().unwrap();
-    assert_eq!(events.len(), 1);
-    assert!(
-        matches!(&events[0], crate::bhl::BhlPageReconciliation::EmptyShard { prefix } if prefix == "ocr/part-8/")
-    );
-    drop(events);
+    {
+        let events = events.lock().unwrap();
+        assert_eq!(events.len(), 1);
+        assert!(
+            matches!(&events[0], crate::bhl::BhlPageReconciliation::EmptyShard { prefix } if prefix == "ocr/part-8/")
+        );
+    }
     let source = source
         .with_reconciliation_report(|_| Err(crate::bhl::error::invalid_pages("audit unavailable")));
     assert!(

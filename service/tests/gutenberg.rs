@@ -248,21 +248,22 @@ async fn books_keep_original_bytes_rdf_and_file_order() {
         assert_eq!(batch["raw_rdf"].as_binary::<i64>().value(0), raw);
         let entries = batch["files"].as_list::<i32>().value(0);
         let entries = entries.as_struct();
-        let requests = observed.requests.lock().unwrap();
-        let uris = [
-            "https://example.invalid/42.txt",
-            "https://example.invalid/42.zip",
-            "https://example.invalid/42.txt",
-        ];
-        assert_eq!(entries.len(), uris.len());
-        assert_eq!(requests.len(), uris.len());
-        for (i, uri) in uris.into_iter().enumerate() {
-            assert_eq!(entries["uri"].as_string::<i32>().value(i), uri);
-            assert_eq!(entries["data"].as_binary::<i64>().value(i), payload);
-            assert_eq!(requests[i].object.locator(), uri);
-            assert_eq!(requests[i].options, options);
+        {
+            let requests = observed.requests.lock().unwrap();
+            let uris = [
+                "https://example.invalid/42.txt",
+                "https://example.invalid/42.zip",
+                "https://example.invalid/42.txt",
+            ];
+            assert_eq!(entries.len(), uris.len());
+            assert_eq!(requests.len(), uris.len());
+            for (i, uri) in uris.into_iter().enumerate() {
+                assert_eq!(entries["uri"].as_string::<i32>().value(i), uri);
+                assert_eq!(entries["data"].as_binary::<i64>().value(i), payload);
+                assert_eq!(requests[i].object.locator(), uri);
+                assert_eq!(requests[i].options, options);
+            }
         }
-        drop(requests);
         let formats = entries["format"].as_list::<i32>().value(1);
         assert_eq!(
             formats.as_string::<i32>().iter().collect::<Vec<_>>(),

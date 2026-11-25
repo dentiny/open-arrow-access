@@ -2,6 +2,7 @@
 name = "open-arrow-access-service"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Dataset source providers for Open Arrow Access"
@@ -80,19 +81,20 @@ uspto = []
 warc = ["open-arrow-access-file-format/warc"]
 zenodo = []
 
-format-xml = [
-    "dep:quick-xml",
-    "open-arrow-access-file-format/xml",
-]
+format-xml = ["dep:quick-xml", "open-arrow-access-file-format/xml"]
 oai = ["format-xml"]
 
 [dependencies]
-tempfile.workspace = true
-# Keep DuckDB on the Arrow 58 binding line used by the public workspace.
-duckdb = { version = "~1.10506.1", default-features = false, features = ["bundled", "appender-arrow", "parquet"] }
 arrow-cast = { workspace = true, optional = true }
-sha2 = { version = "0.11", optional = true }
+tempfile.workspace = true
+# Keep DuckDB on its Arrow 59 binding line.
+duckdb = { git = "https://github.com/duckdb/duckdb-rs.git", rev = "65e8759fd4e83dad443a6e08d0b20314c76c671d", default-features = false, features = [
+    "bundled",
+    "appender-arrow",
+    "parquet",
+] }
 regex = { workspace = true, optional = true }
+sha2 = { version = "0.11", optional = true }
 
 arrow-array.workspace = true
 arrow-json = { workspace = true, optional = true }
@@ -103,10 +105,10 @@ futures.workspace = true
 http.workspace = true
 httpdate = "1"
 open-arrow-access-core.workspace = true
-open-arrow-access-layers = { workspace = true, optional = true }
 open-arrow-access-dataset.workspace = true
 open-arrow-access-decompression = { workspace = true, optional = true }
 open-arrow-access-file-format.workspace = true
+open-arrow-access-layers = { workspace = true, optional = true }
 open-arrow-access-storage.workspace = true
 opendal = { workspace = true, features = ["services-http", "http-transport-reqwest"] }
 opendal-http-transport-reqwest.workspace = true
@@ -122,7 +124,6 @@ url.workspace = true
 arrow-schema.workspace = true
 
 [dev-dependencies]
-tar.workspace = true
 async-compression = { workspace = true, features = ["bzip2"] }
 more-asserts.workspace = true
 open-arrow-access-file-format = { path = "../file-format", default-features = false, features = [
@@ -130,10 +131,8 @@ open-arrow-access-file-format = { path = "../file-format", default-features = fa
     "json",
     "parquet",
 ] }
-open-arrow-access-layers = { workspace = true, features = [
-    "parallel-read",
-    "missing-object",
-] }
+open-arrow-access-layers = { workspace = true, features = ["parallel-read", "missing-object"] }
+tar.workspace = true
 
 arrow-array.workspace = true
 arrow-schema.workspace = true

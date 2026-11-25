@@ -65,7 +65,7 @@ header. Numeric-looking text such as `+1` or integers beyond i64, numeric wideni
 and later nulls alone do not indicate a header. Ambiguous all-string and single-row
 samples are retained as data with `column_1`, `column_2`, etc. Use Present for
 all-string files that have headers. This conservative policy follows arrow-csv's
-[`infer_format` approach](https://github.com/apache/arrow-rs/blob/main/arrow-csv/src/reader/mod.rs); schema inference and decoding use the project's Arrow 58
+[`infer_format` approach](https://github.com/apache/arrow-rs/blob/main/arrow-csv/src/reader/mod.rs); schema inference and decoding use the project's Arrow 59
 dependency.
 
 The default schema sample includes up to 1000 complete records (including the
@@ -106,7 +106,7 @@ override extension detection, for example for semicolon-delimited `.csv` files.
 This applies to schema inference, sequential decoding and parallel framing.
 
 Header policy is resolved once before parallel partitioning and shared by all workers.
-`CsvFormat` is this crate's options wrapper around Arrow 58's CSV format, with
+`CsvFormat` is this crate's options wrapper around Arrow 59's CSV format, with
 the existing builder methods and `.with_header_validation(true)` preserved.
 It is no longer a type alias for `arrow_csv::reader::Format`. Header validation
 checks the complete source schema before projection, using the same incremental
@@ -252,7 +252,7 @@ cargo run --example read_atif --features format-atif
 cargo run --example read_atif --features format-atif -- testdata/atif/trajectories.jsonl jsonl
 ```
 
-The adapter uses the published `atif-arrow` 0.5 release series with Arrow 58.
+The adapter pins the `atif-arrow` 0.6 Git revision with Arrow 59 support.
 
 
 ## WARC parser

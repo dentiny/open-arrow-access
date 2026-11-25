@@ -294,8 +294,8 @@ prefetched input can exceed the number of rows delivered by that limit.
 
 ## Evolve a schema
 
-Add matching `datafusion = { version = "54.1.0", default-features = false }`
-and `arrow-schema = "58"` dependencies. For a record accessor `source` and
+Add matching `datafusion = { version = "55.0.0", default-features = false }`
+and `arrow-schema = "59.2.0"` dependencies. For a record accessor `source` and
 its complete `source_schema` containing `count` and `obsolete` columns:
 
 ```rust,ignore

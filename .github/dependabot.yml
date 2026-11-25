@@ -16,6 +16,8 @@ updates:
       - dependency-name: "opendal*"
       - dependency-name: "lance*"
       - dependency-name: "duckdb"
+      - dependency-name: "atif-arrow"
+      - dependency-name: "xml-arrow"
     groups:
       minor-and-patch:
         patterns:

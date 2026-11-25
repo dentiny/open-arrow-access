@@ -2,6 +2,7 @@
 name = "open-arrow-access-core"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Shared reader, accessor, and layer contracts for Open Arrow Access"

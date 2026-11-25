@@ -2,6 +2,7 @@
 name = "open-arrow-access-layers"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Composable Arrow record layers for Open Arrow Access"
