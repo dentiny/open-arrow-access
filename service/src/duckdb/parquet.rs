@@ -69,4 +69,3 @@ pub(super) fn register(
         ))
         .map_err(error::database)
 }
-
