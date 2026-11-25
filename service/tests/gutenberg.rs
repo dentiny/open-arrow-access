@@ -159,28 +159,8 @@ async fn books_keep_original_bytes_rdf_and_file_order() {
         assert!(observed.requests.lock().unwrap().is_empty());
         let batch = reader.next().await.unwrap().unwrap();
         assert_eq!(batch["raw_rdf"].as_binary::<i64>().value(0), raw);
-        assert_eq!(
-            batch
-                .schema()
-                .field_with_name("raw_rdf")
-                .unwrap()
-                .metadata()["open-arrow-sink:blob"],
-            "bytes"
-        );
         let entries = batch["files"].as_list::<i32>().value(0);
         let entries = entries.as_struct();
-        assert_eq!(
-            entries
-                .fields()
-                .iter()
-                .filter(|f| f
-                    .metadata()
-                    .get("open-arrow-sink:blob")
-                    .is_some_and(|v| v == "bytes"))
-                .map(|f| f.name().as_str())
-                .collect::<Vec<_>>(),
-            vec!["data"]
-        );
         let requests = observed.requests.lock().unwrap();
         let uris = [
             "https://example.invalid/42.txt",

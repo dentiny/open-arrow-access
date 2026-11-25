@@ -49,7 +49,3 @@ is insufficient. Pass the source schema and matching batches directly to a
 blob-aware sink; explicit DownloadBlobLayer selection is unnecessary for fields
 already marked by the source. Callers needing ordinary byte/URL storage can
 remove the marker consistently from both schema and nested array types.
-
-The schema contract test in `tests/blob_fields.rs` enumerates the marked paths
-and checks that unrelated fields remain unmarked. Enable the corresponding
-`service-*` and `format-warc` features to cover each provider.
