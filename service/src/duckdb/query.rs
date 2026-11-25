@@ -1,4 +1,4 @@
-use super::{CachePolicy, ManagedConnection, ParquetOptions, error, parquet};
+use super::{CachePolicy, ManagedConnection, ParquetOptions, error, parquet_table};
 use ::duckdb::{Params, Statement};
 use arrow_array::RecordBatch;
 use arrow_schema::SchemaRef;
@@ -48,7 +48,7 @@ impl DuckDbDatabase {
         paths: &[impl AsRef<str>],
         options: ParquetOptions,
     ) -> Result<()> {
-        parquet::register(&self.connection, table, paths, options)
+        parquet_table::register(&self.connection, table, paths, options)
     }
 
     /// Open an existing file read-only. A missing file is an error, not a newly
