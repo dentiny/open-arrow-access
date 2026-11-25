@@ -2,7 +2,7 @@
 
 Standalone DuckDB SQL used to prepare BHL, arXiv and CourtListener tables.
 BHL and arXiv use DuckDB v1.5.6; CourtListener HTTP/bzip2 import was tested with
-DuckDB 2.0.0 and compression_fs. Run each against a **new** database
+DuckDB 2.0.1 and compression_fs. Run each against a **new** database
 with `-bail`; they create tables and are not rerunnable on an existing import.
 Run these commands from the repository root.
 
@@ -50,7 +50,9 @@ and list element names.
 ## CourtListener
 
 The [CourtListener import script](courtlistener/ingest-courtlistener.sql) creates
-and populates all four typed source tables directly from public HTTPS bzip2 CSVs.
+and populates four fixed-schema source tables from public HTTPS bzip2 CSVs.
+One SQL version supports all 36 reviewed nonempty snapshots; old missing fields
+become NULL and `courtlistener_import_manifest` records source-field availability.
 It force-installs/loads `cache_httpfs` and `compression_fs` from community,
 preserves inline TEXT/HTML/XML and PDF references, and validates unique IDs.
 

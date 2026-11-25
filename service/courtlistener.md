@@ -450,9 +450,14 @@ region and unsigned access on their OpenDAL operator; local mirrors work too.
 ## Standalone SQL import
 
 The [standalone SQL importer](../metadata_import/courtlistener/ingest-courtlistener.sql)
-creates and populates all four typed tables directly from the HTTPS CSV.bz2 exports.
-See its [instructions](../metadata_import/courtlistener/README.md) for extensions,
-configuration and differences from the prepared-reader workflow.
+creates and populates four normalized tables from the HTTPS CSV.bz2 exports.
+The same schema version 1 covers all 36 reviewed nonempty snapshots: all 132
+exported fields are retained, older unavailable fields are NULL, and a manifest
+records the actual source fields and import completion. CSV syntax is handled
+by date without changing the output schema. This SQL schema widens nullability
+for historical missing fields; the strict raw-CSV Arrow contract below remains
+the latest-export source contract. See the [instructions](../metadata_import/courtlistener/README.md)
+for the fixed schema, compatibility and differences from the prepared reader.
 
 ## Typed table records
 
