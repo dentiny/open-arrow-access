@@ -17,9 +17,7 @@ mod connection;
 mod connection_pool;
 pub(crate) mod error;
 
-pub(crate) use connection::ManagedConnection;
-#[cfg(feature = "bhl")]
-pub(crate) use connection::TableColumn;
+pub(crate) use connection::{ManagedConnection, TableColumn};
 pub use connection_pool::{DuckDbConnectionPool, PooledConnection};
 
 mod query;
