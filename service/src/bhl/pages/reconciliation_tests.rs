@@ -1,6 +1,6 @@
 use super::*;
 use crate::{FileSetRequest, bhl::metadata::tests::load};
-use arrow_array::cast::AsArray;
+use arrow_array::{RecordBatch, cast::AsArray};
 use futures::TryStreamExt;
 use open_arrow_access_core::{Accessor, ErrorKind, ReadOptions, into_stream};
 use open_arrow_access_storage::OpenDalAccessor;
