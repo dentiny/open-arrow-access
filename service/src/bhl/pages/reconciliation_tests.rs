@@ -12,6 +12,151 @@ const CANONICAL: &str = "ocr/item-2/item-2-3-5.txt";
 const ALIAS: &str = "ocr/item-2/item-2-0003-0005.txt";
 const ORPHAN: &str = "ocr/item-2/item-2-30-1.txt";
 
+#[rstest]
+#[case(
+    "ocr/item-4/item-4-3-5.txt",
+    "ocr/item-4/item-4-0003-0005.txt",
+    "INSERT INTO item SELECT * REPLACE ('4' AS ItemID) FROM item WHERE ItemID='2'",
+    "page.ItemID"
+)]
+#[case(
+    "ocr/part-8/part-8-3-1.txt",
+    "ocr/part-8/part-8-0003-0001.txt",
+    "UPDATE part SET ItemID='9' WHERE PartID='8'",
+    "page.ItemID"
+)]
+#[case(
+    "ocr/part-8/part-8-3-1.txt",
+    "ocr/part-8/part-8-0003-0001.txt",
+    "UPDATE partpage SET ItemID='9' WHERE PartID='8'",
+    "partpage.ItemID"
+)]
+#[tokio::test]
+async fn conflicting_parent_groups_are_audited_without_reading_their_ocr(
+    #[case] invalid: &str,
+    #[case] alias: &str,
+    #[case] sql: &str,
+    #[case] expected_conflict: &str,
+) {
+    use crate::bhl::metadata::tests::load_with_sql;
+    // Invalid objects are absent from storage. Reading either alias would fail.
+    let (_root, storage) = temp_fs(&[(CANONICAL, b"healthy".as_slice())]);
+    let metadata = Arc::new(load_with_sql(sql).await);
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let sink = events.clone();
+    let pages = BhlPageAccessor::from_metadata(
+        OpenDalAccessor::new(storage),
+        "snapshot",
+        metadata,
+        crate::bhl::error::require_page_metadata,
+    )
+    .unwrap()
+    .with_reconciliation_report(move |event| {
+        sink.lock().unwrap().push(event.clone());
+        Ok(())
+    });
+    let batches = into_stream(
+        pages
+            .open(FileSetRequest::new([invalid, alias, CANONICAL]))
+            .await
+            .unwrap(),
+    )
+    .try_collect::<Vec<_>>()
+    .await
+    .unwrap();
+    assert_eq!(batches.len(), 1);
+    assert_eq!(batches[0]["data"].as_binary::<i64>().value(0), b"healthy");
+    let events = events.lock().unwrap();
+    assert_eq!(events.len(), 1);
+    let BhlPageReconciliation::ConflictingMetadata {
+        canonical,
+        aliases,
+        conflicts,
+        ..
+    } = &events[0]
+    else {
+        panic!("expected metadata quarantine: {:?}", events[0]);
+    };
+    assert_eq!(canonical.locator(), invalid);
+    assert_eq!(
+        aliases.iter().map(|o| o.locator()).collect::<Vec<_>>(),
+        [invalid, alias]
+    );
+    assert!(
+        conflicts
+            .iter()
+            .any(|message| message.contains(expected_conflict))
+    );
+}
+
+#[rstest]
+#[case(false, false)]
+#[case(true, false)]
+#[case(false, true)]
+#[case(true, true)]
+#[tokio::test]
+async fn metadata_quarantine_never_swallows_audit_failure_or_all_empty_output(
+    #[case] healthy: bool,
+    #[case] fail_sink: bool,
+) {
+    use crate::bhl::metadata::tests::load_with_sql;
+    use open_arrow_access_core::AccessorExt;
+    use open_arrow_access_layers::ParallelReadLayer;
+    use std::num::NonZeroUsize;
+    const INVALID: &str = "ocr/item-4/item-4-3-5.txt";
+    let (_root, storage) = temp_fs(&[(CANONICAL, b"healthy".as_slice())]);
+    let metadata = Arc::new(
+        load_with_sql(
+            "INSERT INTO item SELECT * REPLACE ('4' AS ItemID) FROM item WHERE ItemID='2'",
+        )
+        .await,
+    );
+    let pages = BhlPageAccessor::from_metadata(
+        OpenDalAccessor::new(storage),
+        "snapshot",
+        metadata,
+        crate::bhl::error::require_page_metadata,
+    )
+    .unwrap()
+    .with_reconciliation_report(move |_| {
+        if fail_sink {
+            Err(crate::bhl::error::invalid_pages("audit unavailable"))
+        } else {
+            Ok(())
+        }
+    })
+    .layer(ParallelReadLayer::new(
+        NonZeroUsize::new(2).unwrap(),
+        NonZeroUsize::MIN,
+    ));
+    let mut keys = vec![INVALID];
+    if healthy {
+        keys.push(CANONICAL);
+    }
+    let result = into_stream(pages.open(FileSetRequest::new(keys)).await.unwrap())
+        .try_collect::<Vec<_>>()
+        .await;
+    if fail_sink {
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("audit unavailable")
+        );
+    } else if healthy {
+        assert_eq!(
+            result
+                .unwrap()
+                .iter()
+                .map(RecordBatch::num_rows)
+                .sum::<usize>(),
+            1
+        );
+    } else {
+        assert!(result.unwrap_err().to_string().contains("quarantined"));
+    }
+}
+
 async fn source(files: &[(&str, &[u8])]) -> (tempfile::TempDir, BhlPageAccessor<OpenDalAccessor>) {
     let (root, storage) = temp_fs(files);
     let pages = BhlPageAccessor::from_metadata(
@@ -22,6 +167,26 @@ async fn source(files: &[(&str, &[u8])]) -> (tempfile::TempDir, BhlPageAccessor<
     )
     .unwrap();
     (root, pages)
+}
+
+#[tokio::test]
+async fn missing_required_parent_metadata_still_reaches_strict_validation() {
+    use crate::bhl::metadata::tests::load_with_sql;
+    let (_root, storage) = temp_fs(&[]);
+    let metadata = Arc::new(load_with_sql("DELETE FROM item").await);
+    let pages = BhlPageAccessor::from_metadata(
+        OpenDalAccessor::new(storage),
+        "snapshot",
+        metadata,
+        crate::bhl::error::require_page_metadata,
+    )
+    .unwrap()
+    .with_reconciliation_report(|event| panic!("unexpected quarantine: {event:?}"));
+    let error = into_stream(pages.open(FileSetRequest::new([CANONICAL])).await.unwrap())
+        .try_collect::<Vec<_>>()
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("missing metadata"), "{error}");
 }
 
 #[tokio::test]

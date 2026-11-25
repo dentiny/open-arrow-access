@@ -52,10 +52,12 @@ impl<A> BhlPageAccessor<A> {
 
     /// Execute one join per request on a blocking worker on first read, then
     /// stream metadata through a bounded queue into independent OCR partitions.
-    /// `report` sees each canonical page's missing/conflicting joins before its OCR read;
+    /// `report` validates each surviving canonical page before its OCR read;
     /// return an error to stop the scan, or Ok(()) to retain the page.
-    /// Objects without a metadata-authoritative sequence are quarantined before
-    /// this callback. Canonical aliases are emitted once after byte verification.
+    /// Objects without a metadata-authoritative sequence, and canonical groups
+    /// with contradictory parent metadata, are audited and quarantined before
+    /// this callback. Missing required joins still reach the callback.
+    /// Canonical aliases are emitted once after byte verification.
     pub fn from_metadata(
         storage: A,
         snapshot_id: impl Into<String>,
@@ -195,6 +197,15 @@ impl<A: ByteAccessor + 'static> ScanPlanner for BhlPageAccessor<A> {
                                 reconciliation_report(&BhlPageReconciliation::Quarantined {
                                     object: page.object,
                                     reason: "no OCR key matches authoritative SequenceOrder",
+                                    missing: page.missing,
+                                    conflicts: page.conflicts,
+                                })
+                                .map(|()| None)
+                            } else if !selection.page.conflicts.is_empty() {
+                                let page = selection.page;
+                                reconciliation_report(&BhlPageReconciliation::ConflictingMetadata {
+                                    canonical: page.object,
+                                    aliases: selection.objects,
                                     missing: page.missing,
                                     conflicts: page.conflicts,
                                 })
