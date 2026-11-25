@@ -73,6 +73,12 @@ use double quotes with backslash escaping. The July 2023 `SET` preamble is skipp
 Actual source headers are checked against the reviewed column list before any
 source table is populated. These input differences never change the output DDL.
 
+The reader receives explicit column types derived from that same schema and the
+date's exported columns. This also makes parallel boundary detection reject XML
+paragraphs that merely resemble CSV rows. Forcing every source field to VARCHAR
+reproduced false record boundaries on the real opinions export; typed reading
+preserves the original text while validating IDs and other typed fields.
+
 Edit `courtlistener_bulk_root` for a local mirror with the same filenames.
 For an uncompressed mirror, replace `.csv.bz2` with `.csv` in the SQL.
 Unquoted NULL, quoted empty strings and inline multiline TEXT/HTML/XML are

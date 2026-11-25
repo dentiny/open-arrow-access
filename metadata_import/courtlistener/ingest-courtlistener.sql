@@ -42,7 +42,8 @@ SELECT * FROM read_csv(
     quote = getvariable('courtlistener_csv_quote'),
     escape = getvariable('courtlistener_csv_escape'),
     skip = getvariable('courtlistener_csv_skip'),
-    all_varchar = true, nullstr = '', allow_quoted_nulls = false,
+    types = getvariable('courtlistener_' || replace(table_name, '-', '_') || '_types'),
+    nullstr = '', allow_quoted_nulls = false,
     -- The forced sequential CSV path retained buffers and exhausted 12 GB.
     -- Keep the bounded parallel path; preserve_insertion_order/row_number retain ordinals.
     parallel = true, hive_partitioning = false,
@@ -205,6 +206,7 @@ CREATE TABLE courts (
 -- Expected source headers vary by date; the physical table schema above does not.
 CREATE TEMP MACRO courtlistener_expected_columns(target) AS TABLE
 SELECT list(name ORDER BY cid) AS expected_columns,
+    list(type ORDER BY cid) AS source_types,
     (SELECT list(name ORDER BY cid) FROM pragma_table_info(target)
         WHERE name <> '__courtlistener_ordinal') AS canonical_columns
 FROM pragma_table_info(target)
@@ -233,13 +235,24 @@ WHERE name <> '__courtlistener_ordinal' AND NOT (
 );
 
 CREATE TEMP TABLE __courtlistener_expected_headers AS
-SELECT 'opinions' AS table_name, expected_columns, canonical_columns FROM courtlistener_expected_columns('opinions')
+SELECT 'opinions' AS table_name, expected_columns, canonical_columns, source_types FROM courtlistener_expected_columns('opinions')
 UNION ALL
-SELECT 'opinion_clusters' AS table_name, expected_columns, canonical_columns FROM courtlistener_expected_columns('opinion_clusters')
+SELECT 'opinion_clusters' AS table_name, expected_columns, canonical_columns, source_types FROM courtlistener_expected_columns('opinion_clusters')
 UNION ALL
-SELECT 'dockets' AS table_name, expected_columns, canonical_columns FROM courtlistener_expected_columns('dockets')
+SELECT 'dockets' AS table_name, expected_columns, canonical_columns, source_types FROM courtlistener_expected_columns('dockets')
 UNION ALL
-SELECT 'courts' AS table_name, expected_columns, canonical_columns FROM courtlistener_expected_columns('courts');
+SELECT 'courts' AS table_name, expected_columns, canonical_columns, source_types FROM courtlistener_expected_columns('courts');
+
+-- Typed columns also validate parallel scanner boundary candidates. With every
+-- column forced to VARCHAR, XML paragraphs can be mistaken for complete rows.
+SET VARIABLE courtlistener_opinions_types = (
+    SELECT source_types FROM __courtlistener_expected_headers WHERE table_name = 'opinions');
+SET VARIABLE courtlistener_opinion_clusters_types = (
+    SELECT source_types FROM __courtlistener_expected_headers WHERE table_name = 'opinion_clusters');
+SET VARIABLE courtlistener_dockets_types = (
+    SELECT source_types FROM __courtlistener_expected_headers WHERE table_name = 'dockets');
+SET VARIABLE courtlistener_courts_types = (
+    SELECT source_types FROM __courtlistener_expected_headers WHERE table_name = 'courts');
 
 CREATE TEMP TABLE __courtlistener_actual_headers AS
 SELECT 'opinions' AS table_name, list(column_name ORDER BY source_index) AS exported_columns
