@@ -155,7 +155,7 @@ locator/provenance, rather than supplying only the outer TAR URI.
 
 ### Lance Blob V2 is a writer decision
 
-The reader emits Arrow `LargeBinary` with `open-arrow-sink:blob=true` on `data`.
+The reader emits Arrow `LargeBinary` with `open-arrow-sink:blob=bytes` on `data`.
 A blob-aware Lance sink consumes this annotation and converts the bytes to native
 Blob V2; writers that ignore the annotation still produce ordinary binary. Identity/path columns remain ordinary typed
 columns. This Rust reader has no Lance dependency and does not download blob

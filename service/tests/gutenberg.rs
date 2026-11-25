@@ -165,7 +165,7 @@ async fn books_keep_original_bytes_rdf_and_file_order() {
                 .field_with_name("raw_rdf")
                 .unwrap()
                 .metadata()["open-arrow-sink:blob"],
-            "true"
+            "bytes"
         );
         let entries = batch["files"].as_list::<i32>().value(0);
         let entries = entries.as_struct();
@@ -176,7 +176,7 @@ async fn books_keep_original_bytes_rdf_and_file_order() {
                 .filter(|f| f
                     .metadata()
                     .get("open-arrow-sink:blob")
-                    .is_some_and(|v| v == "true"))
+                    .is_some_and(|v| v == "bytes"))
                 .map(|f| f.name().as_str())
                 .collect::<Vec<_>>(),
             vec!["data"]

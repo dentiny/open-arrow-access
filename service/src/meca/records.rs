@@ -1,4 +1,4 @@
-use open_arrow_access_core::blob_field;
+use open_arrow_access_core::blob_bytes_field;
 use std::{
     num::NonZeroUsize,
     sync::{Arc, OnceLock},
@@ -83,7 +83,7 @@ pub fn record_schema() -> SchemaRef {
                 Field::new("href", DataType::LargeUtf8, false),
                 Field::new("media_type", DataType::Utf8, true),
                 Field::new("entry_index", DataType::UInt64, false),
-                blob_field(Field::new("data", DataType::LargeBinary, false)),
+                blob_bytes_field(Field::new("data", DataType::LargeBinary, false)),
             ]))
         })
         .clone()

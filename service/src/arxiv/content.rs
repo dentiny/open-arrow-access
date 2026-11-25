@@ -5,7 +5,7 @@ use super::{
 use arrow_array::cast::AsArray;
 use arrow_schema::{DataType, Field, Schema};
 use futures::{StreamExt, TryStreamExt};
-use open_arrow_access_core::blob_field;
+use open_arrow_access_core::blob_bytes_field;
 use open_arrow_access_core::{
     Accessor, ByteReadRequest, ByteReader, ReadOptions, RecordBatch, RecordBatchBuilder,
     RecordCapability, RecordMetadata, RecordReader, RecordStream, ResolvedProjection, Result,
@@ -112,7 +112,7 @@ pub fn content_schema() -> SchemaRef {
                 Field::new("entry_name", DataType::LargeBinary, false),
                 Field::new("source_index", DataType::UInt64, false),
                 Field::new("source_name", DataType::LargeBinary, false),
-                blob_field(Field::new("data", DataType::LargeBinary, false)),
+                blob_bytes_field(Field::new("data", DataType::LargeBinary, false)),
                 Field::new("data_type", DataType::LargeUtf8, false),
                 Field::new("metadata", metadata, true),
             ]))

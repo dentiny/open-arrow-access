@@ -1,4 +1,4 @@
-use open_arrow_access_core::blob_field;
+use open_arrow_access_core::blob_bytes_field;
 use std::sync::{Arc, OnceLock};
 
 use arrow_schema::{DataType, Field, Schema, TimeUnit};
@@ -117,7 +117,7 @@ pub fn arrow_schema() -> SchemaRef {
             // Keep the public schema's body position, before content_length.
             fields.insert(
                 7,
-                blob_field(Field::new("body", DataType::BinaryView, false)),
+                blob_bytes_field(Field::new("body", DataType::BinaryView, false)),
             );
             Arc::new(Schema::new(fields))
         })

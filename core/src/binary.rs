@@ -1,4 +1,4 @@
-use crate::blob_field;
+use crate::blob_bytes_field;
 use std::sync::Arc;
 
 use arrow_schema::{DataType, Field};
@@ -32,7 +32,7 @@ impl DocumentDecoder for BinaryDecoder {
     }
 
     fn prepare(&self, _: &ReadRequest) -> Result<SchemaRef> {
-        Ok(Arc::new(Schema::new(vec![blob_field(Field::new(
+        Ok(Arc::new(Schema::new(vec![blob_bytes_field(Field::new(
             "data",
             DataType::LargeBinary,
             false,

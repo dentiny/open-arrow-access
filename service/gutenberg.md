@@ -209,7 +209,7 @@ files: List<Struct<
 ### Blob fields passed to open-arrow-sink
 
 `book_schema()` marks exactly these binary payload leaves with Arrow field
-metadata `open-arrow-sink:blob = "true"`:
+metadata `open-arrow-sink:blob = "bytes"`:
 
 | Field | Payload |
 | --- | --- |

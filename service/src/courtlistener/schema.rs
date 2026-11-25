@@ -1,7 +1,7 @@
 //! Source and document-URL schema contracts. Source fields are pinned to the
 //! exported 2026-09-30 headers and companion SQL; PDF bytes belong to the sink.
 use arrow_schema::{DataType, Field, Fields, Schema, SchemaRef, TimeUnit};
-use open_arrow_access_core::blob_field;
+use open_arrow_access_core::blob_uri_field;
 use std::sync::{Arc, OnceLock};
 
 /// Field definitions for the four entities in one joined output schema.
@@ -280,8 +280,8 @@ impl CourtListenerSchemas {
 
 pub(super) fn document_fields() -> Fields {
     vec![
-        blob_field(Field::new("opinion_file_url", DataType::Utf8, true)),
-        blob_field(Field::new("cluster_pdf_url", DataType::Utf8, true)),
+        blob_uri_field(Field::new("opinion_file_url", DataType::Utf8, true)),
+        blob_uri_field(Field::new("cluster_pdf_url", DataType::Utf8, true)),
     ]
     .into()
 }
