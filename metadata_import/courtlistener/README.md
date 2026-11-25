@@ -37,8 +37,11 @@ nullable:
 | `courts` | `pacer_rss_entry_types`, `notes` |
 
 `INSERT ... BY NAME` fills unavailable historical columns with **NULL**, never
-empty strings or zeroes. `citation_count` is signed `BIGINT`: the real
-2026-09-30 export contains `-1`. Existing nullable fields remain nullable.
+empty strings or zeroes. Source integer counters use signed `BIGINT` (`page_count`, vote counts,
+`citation_count`, `view_count`, `ia_upload_failure_count`), preserving the source
+SQL integer range. The real 2026-09-30 export contains `citation_count = -1`.
+Only generated ordinals and row counts use unsigned integers. Existing nullable
+fields remain nullable.
 The complete fixed types and constraints are explicit in the SQL declarations.
 
 `courtlistener_import_manifest` records schema version, snapshot date, each
@@ -52,8 +55,8 @@ FROM courtlistener_import_manifest
 ORDER BY table_name;
 ```
 
-The normalized tables have wider nullability than the strict latest-CSV Arrow
-contract in `CourtListenerSchemas::default()`. DuckDB-based conversion derives
+The normalized tables have wider nullability and signed source counters,
+compared with the strict latest-CSV Arrow contract in `CourtListenerSchemas::default()`. DuckDB-based conversion derives
 its Arrow schema from the normalized tables and can use the same query for every
 date. The direct raw-CSV accessor still requires a matching source schema/dialect.
 

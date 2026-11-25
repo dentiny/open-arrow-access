@@ -455,7 +455,7 @@ The same schema version 1 covers all 36 reviewed nonempty snapshots: all 132
 exported fields are retained, older unavailable fields are NULL, and a manifest
 records the actual source fields and import completion. CSV syntax is handled
 by date without changing the output schema. This SQL schema widens nullability
-for historical missing fields; the strict raw-CSV Arrow contract below remains
+for historical missing fields and retains signed source integer counters; the strict raw-CSV Arrow contract below remains
 the latest-export source contract. See the [instructions](../metadata_import/courtlistener/README.md)
 for the fixed schema, compatibility and differences from the prepared reader.
 

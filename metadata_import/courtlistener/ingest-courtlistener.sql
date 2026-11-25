@@ -50,7 +50,8 @@ SELECT * FROM read_csv(
 );
 
 -- Fixed union of all 132 exported source fields. A field is nullable if any
--- reviewed snapshot lacks it or permits NULL. Missing fields are never filled
+-- reviewed snapshot lacks it or permits NULL. Source integer counters stay signed;
+-- only generated ordinals and row counts use unsigned integers. Missing fields are never filled
 -- with fabricated empty strings, zeroes or current values.
 CREATE TABLE opinions (
     "id" BIGINT NOT NULL,
@@ -61,7 +62,7 @@ CREATE TABLE opinions (
     "joined_by_str" VARCHAR NOT NULL,
     "type" VARCHAR NOT NULL,
     "sha1" VARCHAR NOT NULL,
-    "page_count" UBIGINT,
+    "page_count" BIGINT,
     "download_url" VARCHAR,
     "local_path" VARCHAR NOT NULL,
     "plain_text" VARCHAR NOT NULL,
@@ -91,8 +92,8 @@ CREATE TABLE opinion_clusters (
     "case_name_full" VARCHAR NOT NULL,
     "scdb_id" VARCHAR NOT NULL,
     "scdb_decision_direction" INTEGER,
-    "scdb_votes_majority" UBIGINT,
-    "scdb_votes_minority" UBIGINT,
+    "scdb_votes_majority" BIGINT,
+    "scdb_votes_minority" BIGINT,
     "source" VARCHAR NOT NULL,
     "procedural_history" VARCHAR NOT NULL,
     "attorneys" VARCHAR NOT NULL,
@@ -153,10 +154,10 @@ CREATE TABLE dockets (
     "filepath_local" VARCHAR,
     "filepath_ia" VARCHAR NOT NULL,
     "filepath_ia_json" VARCHAR NOT NULL,
-    "ia_upload_failure_count" UBIGINT,
+    "ia_upload_failure_count" BIGINT,
     "ia_needs_upload" BOOLEAN,
     "ia_date_first_change" TIMESTAMPTZ,
-    "view_count" UBIGINT,
+    "view_count" BIGINT,
     "date_blocked" DATE,
     "blocked" BOOLEAN NOT NULL,
     "appeal_from_id" VARCHAR,
