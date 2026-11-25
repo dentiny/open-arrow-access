@@ -4,8 +4,8 @@ mod books;
 mod error;
 mod metadata;
 mod mirror;
+mod validation;
 pub use books::{GutenbergBookDecoder, GutenbergBooks, book_schema};
-use error::{decode, decode_source};
 pub use mirror::GutenbergMirror;
 
 use std::sync::{Arc, OnceLock};
@@ -140,7 +140,7 @@ fn definitions() -> &'static Definitions {
     DEFINITIONS.get_or_init(|| {
         use DataType::*;
         let mappings = vec![
-            scalar("ebook_id", "@r:about", UInt64, false).parse_with(metadata::parse_ebook_id),
+            scalar("ebook_id", "@r:about", UInt64, false).parse_with(validation::parse_ebook_id),
             scalar("title", "d:title", LargeUtf8, true),
             objects(
                 "creator",
