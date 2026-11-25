@@ -138,7 +138,8 @@ null output fields. These are the explicit conversion rules:
 | Integer primary/foreign identifiers (`id`, `*_id`) | `Int64` | Widen SQL integer IDs; retain nullable foreign keys and validate referential key types |
 | SQL `smallint` | `Int16` | Preserve signed numeric codes/IDs unless listed as a semantic count below |
 | Other SQL `integer` | `Int32` | Preserve signed category/code values rather than treating all integers as counts |
-| `page_count`, `citation_count`, `scdb_votes_majority`, `scdb_votes_minority`, `view_count`, `ia_upload_failure_count` | `UInt64` | Explicit semantic overrides for nonnegative counts; reject negatives, fractions and overflow |
+| `page_count`, `scdb_votes_majority`, `scdb_votes_minority`, `view_count`, `ia_upload_failure_count` | `UInt64` | Explicit semantic overrides for nonnegative counts; reject negatives, fractions and overflow |
+| `citation_count` | `Int64` | Preserve signed source values: the 2026-09-30 export includes `-1`; do not coerce it to NULL or zero |
 | SQL `double precision` (`court.position`) | `Float64` | Preserve the numeric ordering value; reject non-finite values under this contract |
 | SQL text/varchar | `Utf8` | Preserve text and textual identifiers/codes, including leading zeros; do not guess types from names |
 
@@ -221,7 +222,7 @@ cluster: Struct?<
   other_dates: Utf8
   cross_reference: Utf8
   correction: Utf8
-  citation_count: UInt64
+  citation_count: Int64
   precedential_status: Utf8
   date_blocked: Date32?
   blocked: Boolean
@@ -445,6 +446,18 @@ The byte accessor alone defines no Arrow schema; typed table/date accessors
 provide the schema above. Same-date tables are not an atomic database snapshot.
 For public S3, callers configure the `com-courtlistener-storage` bucket,
 region and unsigned access on their OpenDAL operator; local mirrors work too.
+
+## Standalone SQL import
+
+The [standalone SQL importer](../metadata_import/courtlistener/ingest-courtlistener.sql)
+creates and populates four normalized tables from the HTTPS CSV.bz2 exports.
+The same schema version 1 covers all 36 reviewed nonempty snapshots: all 132
+exported fields are retained, older unavailable fields are NULL, and a manifest
+records the actual source fields and import completion. CSV syntax is handled
+by date without changing the output schema. This SQL schema widens nullability
+for historical missing fields and retains signed source integer counters; the strict raw-CSV Arrow contract below remains
+the latest-export source contract. See the [instructions](../metadata_import/courtlistener/README.md)
+for the fixed schema, compatibility and differences from the prepared reader.
 
 ## Typed table records
 

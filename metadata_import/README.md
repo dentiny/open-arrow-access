@@ -1,7 +1,8 @@
 # Metadata imports
 
-Standalone DuckDB SQL used to prepare the BHL and arXiv metadata tables.
-The scripts were prepared for DuckDB v1.5.6. Run each against a **new** database
+Standalone DuckDB SQL used to prepare BHL, arXiv and CourtListener tables.
+BHL and arXiv use DuckDB v1.5.6; CourtListener HTTP/bzip2 import was tested with
+DuckDB 2.0.1 and compression_fs. Run each against a **new** database
 with `-bail`; they create tables and are not rerunnable on an existing import.
 Run these commands from the repository root.
 
@@ -51,6 +52,23 @@ OAI-shaped snapshot: unavailable header values, deletion coverage, and version
 size/source type are not reconstructed. No OAI requests are made. Arrow readers
 must bind the resulting columns to the library schema, including nullability
 and list element names.
+
+## CourtListener
+
+The [CourtListener import script](courtlistener/ingest-courtlistener.sql) creates
+and populates four fixed-schema source tables from public HTTPS bzip2 CSVs.
+One SQL version supports all 36 reviewed nonempty snapshots; old missing fields
+become NULL and `courtlistener_import_manifest` records source-field availability.
+It force-installs/loads `cache_httpfs` and `compression_fs` from community,
+preserves inline TEXT/HTML/XML and PDF references, and validates unique IDs.
+
+```sh
+duckdb -bail -storage-version v1.5.0 /path/to/courtlistener.duckdb \
+  < metadata_import/courtlistener/ingest-courtlistener.sql
+```
+
+See the [CourtListener instructions](courtlistener/README.md) for snapshot
+selection, local mirrors, native cast behavior and prepared-reader compatibility.
 
 Only SQL and documentation belong here; keep downloaded snapshots and generated
 DuckDB databases outside the repository.

@@ -552,6 +552,8 @@ async fn joined_date_has_typed_nested_rows_null_joins_and_exact_provenance() -> 
         .as_any()
         .downcast_ref::<StructArray>()
         .unwrap();
+    // The full 2026-09-30 export contains citation_count = -1.
+    assert_eq!(child::<Int64Array>(cluster, "citation_count").value(0), -1);
     assert!(cluster.is_null(1));
     assert!(!cluster.is_null(2));
     assert!(docket.is_null(1));
