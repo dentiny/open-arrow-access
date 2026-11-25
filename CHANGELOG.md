@@ -2,7 +2,13 @@
 
 ## Unreleased
 
+## 0.21.10 - 2026-11-25
+
 - Add `GutenbergMirror` to route advertised Gutenberg file URLs through caller-configured byte storage while preserving original metadata and sequential-open behavior.
+- Accept LF/CRLF-equivalent BHL OCR aliases while preserving original bytes and auditing deduplication; quarantine true payload conflicts.
+- Audit and skip empty/aggregate-only BHL directories when healthy pages remain; fail all-empty or all-quarantined selections, including native parallel scans.
+- Quarantine and audit complete BHL canonical groups whose parent metadata contradicts OCR identities before any OCR read; retain strict validation of missing required joins.
+- Release all eight public workspace crates at 0.21.10 with aligned internal dependency requirements.
 
 ## 0.21.9 - 2026-11-25
 
