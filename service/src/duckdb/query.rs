@@ -1,15 +1,15 @@
-use super::{ManagedConnection, error};
+use super::{ManagedConnection, ParquetOptions, error, parquet};
 use ::duckdb::{Params, Statement};
 use arrow_array::RecordBatch;
 use arrow_schema::SchemaRef;
 use open_arrow_access_core::Result;
 use std::path::Path;
 
-/// Query a local or remote DuckDB file, including provider metadata databases.
+/// Query a DuckDB file or an in-memory catalog of external Parquet tables.
 ///
-/// The database is opened read-only. Opening and querying are synchronous;
-/// use a blocking worker in async applications. Remote reads use cache_httpfs
-/// with a private temporary on-disk block cache.
+/// Existing database files are opened read-only. Opening and querying are synchronous;
+/// use a blocking worker in async applications. Remote reads use cache_httpfs:
+/// attached databases use a private on-disk cache; Parquet uses a bounded memory cache.
 /// No provider-specific schema is required, and query results retain DuckDB's
 /// Arrow types and column names.
 pub struct DuckDbDatabase {
@@ -18,6 +18,39 @@ pub struct DuckDbDatabase {
 }
 
 impl DuckDbDatabase {
+    /// Create a writable in-memory catalog without a persistent database file.
+    /// Optional trusted initialization SQL can load extensions and create secrets;
+    /// failures omit its text, as in [`Self::connect`]. Local Parquet registration
+    /// requires no extension download. HTTP(S)/S3 registration configures the same
+    /// cache_httpfs with a bounded 128 MiB in-memory block cache. Scratch/spill files may use disk.
+    pub fn in_memory(init_sql: Option<&str>) -> Result<Self> {
+        Ok(Self {
+            connection: ManagedConnection::in_memory_with_init(init_sql)?,
+        })
+    }
+
+    /// Register Parquet files or DuckDB-supported globs as one named SQL view.
+    /// No rows are copied into DuckDB. Binding reads file metadata; queries read
+    /// required columns/pages on demand. Registration uses a shared catalog view,
+    /// so clones and pooled connections see it, including clones created earlier.
+    /// The name is a single identifier in `main`, and existing objects are not replaced.
+    /// Supported remote URLs are HTTP(S)/S3 and always use cache_httpfs;
+    /// other remote schemes return an error. Local files need no extension download.
+    /// Use [`Self::in_memory`] for a writable catalog; read-only databases reject DDL.
+    pub fn register_parquet(&self, table: &str, paths: &[impl AsRef<str>]) -> Result<()> {
+        self.register_parquet_with_options(table, paths, ParquetOptions::default())
+    }
+
+    /// Register Parquet with explicit schema-union and Hive partition options.
+    pub fn register_parquet_with_options(
+        &self,
+        table: &str,
+        paths: &[impl AsRef<str>],
+        options: ParquetOptions,
+    ) -> Result<()> {
+        parquet::register(&self.connection, table, paths, options)
+    }
+
     /// Open an existing file read-only. A missing file is an error, not a newly
     /// created empty database. Paths are passed directly to DuckDB, never SQL.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {

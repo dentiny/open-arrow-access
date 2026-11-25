@@ -57,13 +57,7 @@ impl ManagedConnection {
     /// Initialize secrets before attaching an existing local or remote database.
     /// The script is trusted caller SQL, executed once per database instance.
     pub(crate) fn connect(location: &str, init_sql: Option<&str>) -> Result<Self> {
-        let connection = Self::in_memory()?;
-        if let Some(sql) = init_sql {
-            // DuckDB errors may echo SQL containing credentials; do not retain them.
-            connection
-                .execute_batch(sql)
-                .map_err(|_| error::init_setup())?;
-        }
+        let connection = Self::in_memory_with_init(init_sql)?;
         connection.configure_remote_cache()?;
         let location = location.replace('\'', "''");
         connection
@@ -74,18 +68,54 @@ impl ManagedConnection {
         Ok(connection)
     }
 
+    pub(crate) fn in_memory_with_init(init_sql: Option<&str>) -> Result<Self> {
+        let connection = Self::in_memory()?;
+        if let Some(sql) = init_sql {
+            // DuckDB errors may echo SQL containing credentials; do not retain them.
+            connection
+                .execute_batch(sql)
+                .map_err(|_| error::init_setup())?;
+        }
+        Ok(connection)
+    }
+
     /// The same scratch owner keeps spill files and cached remote blocks alive
     /// until the final cloned connection closes. No full database copy is made.
     fn configure_remote_cache(&self) -> Result<()> {
+        self.configure_cache(false)
+    }
+
+    /// Parquet scans should not accumulate a full dataset in the local cache.
+    pub(crate) fn configure_parquet_cache(&self) -> Result<()> {
+        self.configure_cache(true)
+    }
+
+    fn configure_cache(&self, in_memory: bool) -> Result<()> {
         let cache = self.directory.path().join("http-cache");
         std::fs::create_dir_all(&cache).map_err(error::scratch)?;
+        // Global defaults reach existing/future clones; local assignments also
+        // override initialization SQL on the connection doing registration.
+        let policy = if in_memory {
+            "SET GLOBAL cache_httpfs_type = 'in_mem';
+             SET cache_httpfs_type = 'in_mem';
+             SET GLOBAL cache_httpfs_cache_block_size = 524288;
+             SET cache_httpfs_cache_block_size = 524288;
+             SET GLOBAL cache_httpfs_max_in_mem_cache_block_count = 256;
+             SET cache_httpfs_max_in_mem_cache_block_count = 256;"
+        } else {
+            "SET GLOBAL cache_httpfs_type = 'on_disk';
+             SET cache_httpfs_type = 'on_disk';"
+        };
         self.connection
             .execute_batch(&format!(
                 "FORCE INSTALL cache_httpfs FROM community;
                  LOAD cache_httpfs;
-                 SET cache_httpfs_type = 'on_disk';
+                 {policy}
+                 SET GLOBAL cache_httpfs_cache_directories_config = '';
                  SET cache_httpfs_cache_directories_config = '';
+                 SET GLOBAL cache_httpfs_cache_directory = '{}';
                  SET cache_httpfs_cache_directory = '{}';",
+                cache.to_string_lossy().replace('\'', "''"),
                 cache.to_string_lossy().replace('\'', "''")
             ))
             .map_err(error::cache_setup)

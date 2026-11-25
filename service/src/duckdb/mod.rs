@@ -1,8 +1,9 @@
-//! Query local or remote DuckDB files and manage embedded provider databases.
+//! Query DuckDB databases or registered Parquet files and manage provider databases.
 //!
 //! `DuckDbDatabase::connect` executes optional initialization SQL before a read-only
-//! local/remote ATTACH. Remote HTTP/S3 reads use cache_httpfs with a private
-//! temporary on-disk cache, fetching only requested blocks.
+//! local/remote ATTACH. Remote HTTP/S3 database reads use cache_httpfs with a private
+//! temporary on-disk cache. `DuckDbDatabase::in_memory` can register Parquet views;
+//! all remote Parquet reads use cache_httpfs with a bounded 128 MiB memory cache.
 //! BHL uses in-memory or caller-owned persistent databases; CourtListener uses a
 //! disposable on-disk database. All modes configure a private spill directory,
 //! disable DuckDB's external memory cache, and retain scratch/cache storage
@@ -13,9 +14,14 @@ mod connection;
 mod connection_pool;
 pub(crate) mod error;
 
-pub(crate) use connection::{ManagedConnection, TableColumn};
+pub(crate) use connection::ManagedConnection;
+#[cfg(feature = "bhl")]
+pub(crate) use connection::TableColumn;
 pub use connection_pool::{DuckDbConnectionPool, PooledConnection};
 
 mod query;
 pub use ::duckdb::{Params, params};
 pub use query::DuckDbDatabase;
+
+mod parquet;
+pub use parquet::ParquetOptions;

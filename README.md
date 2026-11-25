@@ -93,6 +93,65 @@ DuckDB attaches the database read-only and `cache_httpfs` fetches requested bloc
 into a private temporary on-disk cache. Opening does not first download the entire
 database. See [remote access and secrets](#duckdb-native-remote-access-and-secrets).
 
+## Register Parquet files as DuckDB tables
+
+Create an in-memory catalog and register external Parquet files as named views.
+The files remain the source of the data; registration does not import their rows
+or create a persistent `.duckdb` file. Query results use the same incremental
+Arrow interface as existing database queries:
+
+```rust,no_run
+use open_arrow_access::service::duckdb::{DuckDbDatabase, params};
+
+fn main() -> open_arrow_access::Result<()> {
+    let database = DuckDbDatabase::in_memory(None)?;
+    database.register_parquet("opinions", &["/data/opinions/part-*.parquet"])?;
+    database.query(
+        "SELECT id, download_url FROM opinions WHERE id >= ? LIMIT 100",
+        params![0_i64],
+        |batch| {
+            println!("{} rows", batch.num_rows());
+            Ok(())
+        },
+    )?;
+    Ok(())
+}
+```
+
+Pass one filename, a list of filenames, or DuckDB-supported local/S3 globs.
+Names are single SQL identifiers in `main`; registration fails if the name
+already exists. Registered views are shared with `try_clone()` and
+`DuckDbConnectionPool`, including connections created before registration.
+Use the writable in-memory catalog for registration; `open()` and `connect()`
+keep their existing read-only source behavior.
+
+All remote Parquet registration uses `cache_httpfs`. Supported remote URLs are
+HTTP(S) and S3; other remote schemes are rejected rather than bypassing the cache.
+The extension is force-installed from community and loaded before binding the
+view. Parquet uses a bounded 128 MiB in-memory block cache, shared by clones,
+instead of caching a dataset on local disk. Local Parquet support is bundled and
+needs no extension download. Registration can read footers and list matching
+files; queries fetch needed columns/pages. Query intermediates may still spill
+to the owned temporary directory.
+
+For OCI, use its S3-compatible endpoint in initialization SQL and register
+`s3://bucket/prefix/*.parquet`. Authentication uses DuckDB secrets, as described
+under [remote access and secrets](#duckdb-native-remote-access-and-secrets):
+
+```rust,ignore
+let init_sql = std::fs::read_to_string("/run/secrets/duckdb.sql")?;
+let database = DuckDbDatabase::in_memory(Some(&init_sql))?;
+database.register_parquet("opinions", &[
+    "s3://bucket/courtlistener/2026-09-30/opinions/*.parquet",
+])?;
+```
+
+Defaults require compatible file schemas and disable inferred Hive partition
+columns. Use `register_parquet_with_options` and
+`ParquetOptions { union_by_name: true, hive_partitioning: false }` to combine
+files by column name and fill unavailable columns with NULL. Enable
+`hive_partitioning` explicitly to expose `key=value` directory components.
+
 ## Reusable file sources
 
 For an explicitly selected provider attachment, use the typed

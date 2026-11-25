@@ -52,6 +52,14 @@ spill directories, temporary on-disk databases, connection cloning and cleanup,
 and database/scratch error conversion. Provider-specific schemas, import logic,
 SQL joins and Arrow conversion remain with each provider.
 
+The public `DuckDbDatabase::in_memory(init_sql)` entry point also hosts external
+Parquet views. `register_parquet(name, paths)` supports file lists and local/S3
+globs without importing rows. `register_parquet_with_options` exposes schema
+union and Hive partition settings. Views are shared by cloned and pooled
+connections. All supported remote Parquet URLs (HTTP(S)/S3) use `cache_httpfs`
+with a bounded 128 MiB in-memory block cache; local Parquet is bundled. See the
+[Parquet registration example](../README.md#register-parquet-files-as-duckdb-tables).
+
 ## Example setup
 
 The following example discovers files and reads bytes.
