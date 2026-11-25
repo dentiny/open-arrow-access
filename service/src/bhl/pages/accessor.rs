@@ -227,7 +227,7 @@ impl<A: ByteAccessor + 'static> ScanPlanner for BhlPageAccessor<A> {
                     completion.discovery_finished()?;
                     Ok(None)
                 })
-                .try_filter_map(future::ready),
+                .try_filter_map(|partition| future::ready(Ok(partition))),
             )
             .boxed();
         Ok(plan.with_ordering(OrderRequirement::Reorderable))

@@ -177,7 +177,7 @@ async fn rejects_invalid_or_empty_shards() {
 }
 
 #[tokio::test]
-async fn parent_conflicts_remain_strict_unless_overridden() {
+async fn parent_conflicts_are_quarantined_before_metadata_validation() {
     let key = "ocr/item-99/item-99-3-5.txt";
     let (_root, source) = fixture(&[(key, b"conflicting parent")]).await;
     let request = BhlShardReadRequest::new("ocr/item-99/").unwrap();
@@ -185,12 +185,26 @@ async fn parent_conflicts_remain_strict_unless_overridden() {
         read(&source, request.clone()).await,
         ErrorKind::InvalidInput,
     );
-    assert_eq!(error.object().unwrap().locator(), key);
-    let permissive = source.with_report(|page| {
-        assert!(!page.conflicts.is_empty());
+    assert!(error.to_string().contains("quarantined"), "{error}");
+    let permissive = source.with_report(|_| {
+        panic!("a conflicting group must not reach the metadata callback");
+    });
+    let error = expect_err_kind(read(&permissive, request).await, ErrorKind::InvalidInput);
+    assert!(error.to_string().contains("quarantined"), "{error}");
+
+    let (_root, mixed) = fixture(&[
+        (key, b"conflicting parent"),
+        ("ocr/item-2/item-2-3-5.txt", b"healthy"),
+    ])
+    .await;
+    let mixed = mixed.with_report(|page| {
+        assert!(page.conflicts.is_empty());
         Ok(())
     });
-    assert_eq!(read(&permissive, request).await.unwrap().len(), 1);
+    let request = BhlShardReadRequest::from_prefixes(["ocr/item-99/", "ocr/item-2/"]).unwrap();
+    let rows = read(&mixed, request).await.unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["data"].as_binary::<i64>().value(0), b"healthy");
 }
 
 #[tokio::test]
