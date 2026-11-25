@@ -38,8 +38,10 @@ impl CachePolicy {
         }
     }
 
-    pub(super) fn sql(self) -> Result<String> {
-        let settings = match self {
+    /// Validate block sizes and memory capacities before opening a connection.
+    /// Disk mode permits zero memory blocks to disable its read-through cache.
+    pub fn validate(&self) -> Result<()> {
+        match *self {
             Self::InMemory {
                 block_size,
                 max_blocks,
@@ -54,6 +56,31 @@ impl CachePolicy {
                         "cache block size and count must be positive with a capacity that fits u64",
                     ));
                 }
+            }
+            Self::OnDisk {
+                block_size,
+                max_in_memory_blocks,
+                ..
+            } => {
+                if block_size == 0 || block_size.checked_mul(max_in_memory_blocks).is_none() {
+                    return Err(Error::new(
+                        ErrorKind::InvalidInput,
+                        "duckdb_cache",
+                        "disk cache block size must be positive and memory capacity must fit u64",
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn sql(self) -> Result<String> {
+        self.validate()?;
+        let settings = match self {
+            Self::InMemory {
+                block_size,
+                max_blocks,
+            } => {
                 vec![
                     ("cache_httpfs_type", "'in_mem'".to_owned()),
                     ("cache_httpfs_cache_block_size", block_size.to_string()),
@@ -68,13 +95,6 @@ impl CachePolicy {
                 max_in_memory_blocks,
                 min_free_disk_bytes,
             } => {
-                if block_size == 0 || block_size.checked_mul(max_in_memory_blocks).is_none() {
-                    return Err(Error::new(
-                        ErrorKind::InvalidInput,
-                        "duckdb_cache",
-                        "disk cache block size must be positive and memory capacity must fit u64",
-                    ));
-                }
                 let mut settings = vec![
                     ("cache_httpfs_type", "'on_disk'".to_owned()),
                     ("cache_httpfs_cache_block_size", block_size.to_string()),

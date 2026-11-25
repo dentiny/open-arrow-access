@@ -79,7 +79,7 @@ impl ManagedConnection {
         init_sql: Option<&str>,
         cache_policy: CachePolicy,
     ) -> Result<Self> {
-        cache_policy.sql()?;
+        cache_policy.validate()?;
         let mut connection = Self::in_memory()?;
         connection.cache_policy = cache_policy;
         if let Some(sql) = init_sql {

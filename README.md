@@ -138,7 +138,8 @@ free-disk eviction threshold. Memory capacity is `block_size * max_in_memory_blo
 zero memory blocks disable the read-through layer. `min_free_disk_bytes = 0`
 retains the extension's default 5% reservation. The threshold reserves free disk
 space; cache_httpfs does not expose a hard maximum cache-directory size. Registration
-preserves this connection policy. Local Parquet support is bundled and needs no
+preserves this connection policy. `CachePolicy::validate()` is also public;
+connection constructors validate the policy automatically. Local Parquet support is bundled and needs no
 extension download. Registration can read footers and list matching
 files; queries fetch needed columns/pages. Query intermediates may still spill
 to the owned temporary directory.
