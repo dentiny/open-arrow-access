@@ -1,4 +1,4 @@
-.PHONY: lint lint-rust lint-toml fmt fmt-check check-layer-features
+.PHONY: lint lint-rust lint-toml fmt fmt-check
 
 lint: fmt-check lint-toml lint-rust
 
@@ -16,6 +16,3 @@ lint-toml:
 
 lint-rust:
 	cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-
-check-layer-features:
-	python3 scripts/check-layer-features.py
