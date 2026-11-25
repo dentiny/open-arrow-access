@@ -15,19 +15,3 @@ pub(super) fn invalid_mirror_uri(uri: &str) -> Error {
         format!("unsupported or unsafe Gutenberg file URI: {uri}"),
     )
 }
-
-pub(super) fn missing_field(field: &str) -> Error {
-    decode(format!("missing {field}"))
-}
-
-pub(super) fn invalid_number(field: &str, value: &str) -> Error {
-    decode(format!("invalid {field}: {value:?}"))
-}
-
-pub(super) fn invalid_ebook_uri() -> Error {
-    decode("invalid ebook URI")
-}
-
-pub(super) fn invalid_ebook_id() -> Error {
-    decode("invalid ebook ID")
-}

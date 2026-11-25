@@ -82,12 +82,11 @@ impl<A> ByteAccessor for GutenbergMirror<A> where
 fn mirror_path(uri: &str) -> Result<String> {
     let invalid = || error::invalid_mirror_uri(uri);
     let url = url::Url::parse(uri).map_err(|_| invalid())?;
-    validation::mirror_uri(&url, uri)?;
     let decoded = percent_encoding::percent_decode_str(url.path())
         .decode_utf8()
         .map_err(|_| invalid())?;
     let path = decoded.trim_start_matches('/');
-    validation::mirror_path(path, uri)?;
+    validation::mirror_uri(&url, path, uri)?;
     if let Some(rest) = path.strip_prefix("files/") {
         let (id, member) = rest.split_once('/').ok_or_else(invalid)?;
         validation::mirror_ebook_id(id, uri)?;

@@ -11,7 +11,7 @@ use open_arrow_access_file_format::{
     xml::{XmlFormat, XmlLimits},
 };
 
-use super::{Mapping, error, validation};
+use super::{Mapping, decode, decode_source};
 
 /// Validate all mapped fields and build one projected row.
 pub(super) async fn read_metadata(
@@ -124,7 +124,9 @@ fn scalar_value<'a>(
         && mapping.xml.path().contains('@');
     let text =
         string_value(column.as_string::<i32>(), index).filter(|s| !s.is_empty() || keep_empty);
-    validation::required_field(name, field.is_nullable(), text)?;
+    if !field.is_nullable() && text.is_none_or(str::is_empty) {
+        return Err(decode(format!("missing {name}")));
+    }
     if let Some(parse) = mapping.parser {
         return Ok(text.map(parse).transpose()?.unwrap_or(FieldValue::Null));
     }
@@ -146,7 +148,7 @@ fn scalar_value<'a>(
 fn number<T: std::str::FromStr>(value: &str, field: &str) -> Result<T> {
     value
         .parse()
-        .map_err(|_| error::invalid_number(field, value))
+        .map_err(|_| decode(format!("invalid {field}: {value:?}")))
 }
 
 pub(super) fn parse_ebook_id(about: &str) -> Result<FieldValue<'_>> {
@@ -154,14 +156,17 @@ pub(super) fn parse_ebook_id(about: &str) -> Result<FieldValue<'_>> {
         .strip_prefix("ebooks/")
         .or_else(|| about.strip_prefix("http://www.gutenberg.org/ebooks/"))
         .or_else(|| about.strip_prefix("https://www.gutenberg.org/ebooks/"))
-        .ok_or_else(error::invalid_ebook_uri)?;
-    let value = id.parse::<u64>().map_err(|_| error::invalid_ebook_id())?;
-    validation::ebook_id(id, value)?;
-    Ok(FieldValue::UInt64(value))
+        .ok_or_else(|| decode("invalid ebook URI"))?;
+    id.parse::<u64>()
+        .ok()
+        .filter(|id| *id != 0)
+        .filter(|_| id.bytes().all(|byte| byte.is_ascii_digit()))
+        .map(FieldValue::UInt64)
+        .ok_or_else(|| decode("invalid ebook ID"))
 }
 
 fn parse_issued_date(value: &str) -> Result<i32> {
-    let date = NaiveDate::parse_from_str(value, "%Y-%m-%d").map_err(error::decode_source)?;
+    let date = NaiveDate::parse_from_str(value, "%Y-%m-%d").map_err(decode_source)?;
     Ok(date
         .signed_duration_since(NaiveDate::from_ymd_opt(1970, 1, 1).unwrap())
         .num_days() as i32)
