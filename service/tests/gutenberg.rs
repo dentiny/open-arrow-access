@@ -14,6 +14,97 @@ fn request() -> ReadRequest {
 }
 
 #[tokio::test]
+async fn retains_conflicting_file_declarations_in_metadata_and_books() {
+    use open_arrow_access_service::gutenberg::{GutenbergBookDecoder, GutenbergBooks};
+    let raw = fixture!("gutenberg", "repeated_file_properties.rdf").await;
+    let mut metadata = GutenbergAccessor::with_default_decoder(MemoryAccessor::new(&raw, 17))
+        .open(request())
+        .await
+        .unwrap();
+    let batch = metadata.next().await.unwrap().unwrap();
+    let files = batch["files"].as_list::<i32>().value(0);
+    let files = files.as_struct();
+    assert!(files["extent"].is_null(0));
+    assert!(files["modified"].is_null(0));
+    let extents = files["extent_values"].as_list::<i32>().value(0);
+    assert_eq!(
+        extents.as_primitive::<UInt64Type>().values().as_ref(),
+        &[402223, 402145]
+    );
+    let modified = files["modified_values"].as_list::<i32>().value(0);
+    assert_eq!(
+        modified.as_string::<i32>().value(0),
+        "2024-11-05T04:46:05.484723"
+    );
+    assert_eq!(
+        modified.as_string::<i32>().value(1),
+        "2023-10-05T05:40:29.012693"
+    );
+    assert!(files["extent_values"].as_list::<i32>().value(1).is_empty());
+    let books = GutenbergBooks::new(
+        MemoryAccessor::new(&raw, 17),
+        GutenbergBookDecoder::new(MemoryAccessor::new(b"payload", 2)),
+    );
+    let mut reader = books.open(request()).await.unwrap();
+    let book = reader.next().await.unwrap().unwrap();
+    assert_eq!(book["raw_rdf"].as_binary::<i64>().value(0), raw);
+    let contents = book["files"].as_list::<i32>().value(0);
+    assert_eq!(
+        contents.as_struct()["data"].as_binary::<i64>().value(0),
+        b"payload"
+    );
+    assert_eq!(
+        contents.as_struct()["extent_values"]
+            .as_list::<i32>()
+            .value(0)
+            .as_ref(),
+        extents.as_ref()
+    );
+}
+
+#[tokio::test]
+async fn keeps_agreed_scalar_values_and_validates_every_numeric_declaration() {
+    let raw = String::from_utf8(fixture!("gutenberg", "book.rdf").await).unwrap();
+    let agreed = raw.replace(
+        "<d:extent>7</d:extent>",
+        "<d:extent>7</d:extent><d:extent>7</d:extent>",
+    );
+    let mut reader =
+        GutenbergAccessor::with_default_decoder(MemoryAccessor::new(agreed.as_bytes(), 17))
+            .open(request())
+            .await
+            .unwrap();
+    let batch = reader.next().await.unwrap().unwrap();
+    let files = batch["files"].as_list::<i32>().value(0);
+    assert_eq!(
+        files.as_struct()["extent"]
+            .as_primitive::<UInt64Type>()
+            .value(0),
+        7
+    );
+    assert_eq!(
+        files.as_struct()["extent_values"]
+            .as_list::<i32>()
+            .value(0)
+            .len(),
+        2
+    );
+    let bad = raw.replace(
+        "<d:extent>7</d:extent>",
+        "<d:extent>7</d:extent><d:extent>invalid</d:extent>",
+    );
+    let mut reader =
+        GutenbergAccessor::with_default_decoder(MemoryAccessor::new(bad.as_bytes(), 17))
+            .open(request().with_options(ReadOptions {
+                projection: Some(vec!["title".into()]),
+                ..Default::default()
+            }))
+            .await
+            .unwrap();
+    assert_eq!(reader.next().await.unwrap_err().kind(), ErrorKind::Decode);
+}
+
+#[tokio::test]
 async fn keeps_mapped_book_and_file_metadata_in_rdf_order() {
     let accessor = GutenbergAccessor::with_default_decoder(MemoryAccessor::new(
         &fixture!("gutenberg", "book.rdf").await,
@@ -41,7 +132,7 @@ async fn keeps_mapped_book_and_file_metadata_in_rdf_order() {
     assert_eq!(uris.value(1), "https://example.invalid/42.zip");
     assert_eq!(uris.len(), 3);
     assert_eq!(uris.value(2), uris.value(0));
-    assert_eq!(files.num_columns(), 4);
+    assert_eq!(files.num_columns(), 6);
     assert_eq!(files["format"].as_list::<i32>().value(0).len(), 1);
     assert!(reader.next().await.unwrap().is_none());
     assert!(reader.next().await.unwrap().is_none());
