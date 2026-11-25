@@ -2,6 +2,7 @@
 use super::{ArxivService, validation};
 use arrow_schema::{DataType, Field, Schema};
 use futures::stream;
+use open_arrow_access_core::blob_field;
 use open_arrow_access_core::{
     Accessor, ByteReadOptions, ByteReadRequest, ByteReader, Capability, ObjectRef,
     OrderRequirement, ReadOptions, ReadOptionsProvider, RecordBatchBuilder, RecordCapability,
@@ -84,7 +85,7 @@ impl ReadOptionsProvider for ArxivArticleReadRequest {
     }
 }
 
-/// Format-neutral artifact rows. `data` is ordinary binary, not a Lance blob marker.
+/// Format-neutral artifact rows. `data` carries the sink blob-input annotation.
 pub fn article_schema() -> SchemaRef {
     static SCHEMA: OnceLock<SchemaRef> = OnceLock::new();
     SCHEMA
@@ -95,7 +96,7 @@ pub fn article_schema() -> SchemaRef {
                 Field::new("source_uri", DataType::LargeUtf8, false),
                 Field::new("entry_index", DataType::UInt64, false),
                 Field::new("entry_name", DataType::LargeBinary, false),
-                Field::new("data", DataType::LargeBinary, false),
+                blob_field(Field::new("data", DataType::LargeBinary, false)),
             ]))
         })
         .clone()

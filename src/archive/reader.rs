@@ -1,3 +1,4 @@
+use crate::blob_field;
 use std::sync::{Arc, OnceLock};
 
 use arrow_schema::{DataType, Field};
@@ -20,7 +21,7 @@ pub fn archive_schema() -> SchemaRef {
                 Field::new("source_uri", DataType::LargeUtf8, false),
                 Field::new("entry_index", DataType::UInt64, false),
                 Field::new("entry_name", DataType::LargeBinary, false),
-                Field::new("data", DataType::LargeBinary, false),
+                blob_field(Field::new("data", DataType::LargeBinary, false)),
             ]))
         })
         .clone()

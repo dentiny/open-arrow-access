@@ -1,3 +1,4 @@
+use open_arrow_access_core::blob_field;
 use std::{
     num::NonZeroUsize,
     sync::{Arc, OnceLock},
@@ -113,7 +114,7 @@ pub fn record_schema() -> SchemaRef {
                 Field::new("shard_uri", DataType::LargeUtf8, false),
                 Field::new("entry_index", DataType::UInt64, false),
                 Field::new("entry_name", DataType::LargeBinary, false),
-                Field::new("data", DataType::LargeBinary, false),
+                blob_field(Field::new("data", DataType::LargeBinary, false)),
             ]))
         })
         .clone()

@@ -1,5 +1,6 @@
 //! One book with every advertised original file, without format conversion.
 
+use open_arrow_access_core::blob_field;
 use std::sync::{Arc, OnceLock};
 
 use arrow_array::{Array, ArrayRef, LargeBinaryArray, ListArray, StructArray, cast::AsArray};
@@ -29,23 +30,24 @@ pub fn book_schema() -> SchemaRef {
                 unreachable!()
             };
             let mut children = children.to_vec();
-            children.push(Arc::new(blob_field("data")));
+            children.push(Arc::new(blob_field(Field::new(
+                "data",
+                DataType::LargeBinary,
+                false,
+            ))));
             *files = Arc::new(Field::new_list(
                 "files",
                 Field::new_struct("item", children, false),
                 false,
             ));
-            fields.push(Arc::new(blob_field("raw_rdf")));
+            fields.push(Arc::new(blob_field(Field::new(
+                "raw_rdf",
+                DataType::LargeBinary,
+                false,
+            ))));
             Arc::new(Schema::new(fields))
         })
         .clone()
-}
-
-// Use the sink's public metadata contract without depending on a writer crate.
-// Apply it to the nested array fields too: their DataType must match the schema.
-fn blob_field(name: &str) -> Field {
-    Field::new(name, DataType::LargeBinary, false)
-        .with_metadata([("open-arrow-sink:blob".into(), "true".into())].into())
 }
 
 /// Whole-book view using the shared document reader's lazy I/O and scan plan.
@@ -112,7 +114,11 @@ where
                         );
                     }
                     let mut fields = entries.fields().to_vec();
-                    fields.push(Arc::new(blob_field("data")));
+                    fields.push(Arc::new(blob_field(Field::new(
+                        "data",
+                        DataType::LargeBinary,
+                        false,
+                    ))));
                     let mut values = entries.columns().to_vec();
                     values.push(Arc::new(LargeBinaryArray::from_iter_values(
                         payloads.iter(),

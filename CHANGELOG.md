@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Mark Gutenberg `files[].data` and `raw_rdf` with `open-arrow-sink:blob=true` so blob-aware sinks can discover payload fields from Arrow metadata, including nested array fields.
+- Share the source blob-field annotation helper and mark original binary/archive, arXiv, BHL, MECA, Gutenberg and WARC payloads plus selected PMC/CourtListener download URLs. Preserve filenames, metadata links, typed text and WARC BinaryView buffers; document the sink BinaryView compatibility requirement.
 
 - Add Gutenberg whole-book Arrow rows retaining every advertised file's original bytes, MIME types and URI, plus exact RDF metadata for unmapped fields. Keep the metadata-only schema unchanged.
 
