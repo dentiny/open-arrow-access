@@ -160,15 +160,19 @@ async fn rejects_invalid_or_empty_shards() {
         ("ocr/item-99/unexpected.txt", b"invalid"),
     ])
     .await;
-    for prefix in ["ocr/part-8/", "ocr/item-99/", "ocr/item-20/"] {
-        for request in [
-            BhlShardReadRequest::new(prefix).unwrap(),
-            BhlShardReadRequest::from_prefixes(["ocr/item-2/", prefix]).unwrap(),
-        ] {
-            source.metadata(request.clone()).await.unwrap();
-            let error = expect_err_kind(read(&source, request).await, ErrorKind::InvalidInput);
-            assert!(error.to_string().contains(prefix), "{error}");
-        }
+    for prefix in ["ocr/part-8/", "ocr/item-20/"] {
+        let request = BhlShardReadRequest::new(prefix).unwrap();
+        let error = expect_err_kind(read(&source, request).await, ErrorKind::InvalidInput);
+        assert!(error.to_string().contains(prefix), "{error}");
+        let request = BhlShardReadRequest::from_prefixes(["ocr/item-2/", prefix]).unwrap();
+        assert_eq!(read(&source, request).await.unwrap().len(), 1);
+    }
+    for request in [
+        BhlShardReadRequest::new("ocr/item-99/").unwrap(),
+        BhlShardReadRequest::from_prefixes(["ocr/item-2/", "ocr/item-99/"]).unwrap(),
+    ] {
+        let error = expect_err_kind(read(&source, request).await, ErrorKind::InvalidInput);
+        assert!(error.to_string().contains("ocr/item-99/"), "{error}");
     }
 }
 
@@ -273,4 +277,38 @@ async fn rejects_missing_or_ambiguous_canonical_keys_even_with_permissive_metada
         assert!(error.to_string().contains("SequenceOrder"), "{error}");
         assert!(error.to_string().contains("ocr/item-2/"), "{error}");
     }
+}
+
+#[tokio::test]
+async fn empty_directory_audit_is_required_and_aggregate_is_never_read_as_a_page() {
+    let (_root, source) = fixture(&[
+        ("ocr/item-2/item-2-3-5.txt", b"valid"),
+        ("ocr/part-8/part-8.txt", b"aggregate"),
+    ])
+    .await;
+    let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let sink = events.clone();
+    let source = source.with_reconciliation_report(move |event| {
+        sink.lock().unwrap().push(event.clone());
+        Ok(())
+    });
+    let request = BhlShardReadRequest::from_prefixes(["ocr/part-8/", "ocr/item-2/"]).unwrap();
+    let batches = read(&source, request.clone()).await.unwrap();
+    assert_eq!(batches.len(), 1);
+    assert_eq!(batches[0]["data"].as_binary::<i64>().value(0), b"valid");
+    let events = events.lock().unwrap();
+    assert_eq!(events.len(), 1);
+    assert!(
+        matches!(&events[0], crate::bhl::BhlPageReconciliation::EmptyShard { prefix } if prefix == "ocr/part-8/")
+    );
+    drop(events);
+    let source = source
+        .with_reconciliation_report(|_| Err(crate::bhl::error::invalid_pages("audit unavailable")));
+    assert!(
+        read(&source, request)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("audit unavailable")
+    );
 }

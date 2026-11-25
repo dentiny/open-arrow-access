@@ -8,7 +8,7 @@ use super::{
 };
 use crate::FileSetRequest;
 use arrow_array::{RecordBatch, StructArray};
-use futures::{TryStreamExt, future, stream};
+use futures::{StreamExt, TryStreamExt, future, stream};
 use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteReadOptions, Capability, OrderRequirement, RecordCapability,
     RecordMetadata, RecordReader, Result, ScanPartition, ScanPlan, ScanPlanner, SchemaRef,
@@ -29,7 +29,7 @@ enum MetadataSource {
 
 /// Read selected OCR pages with caller-supplied or DuckDB-joined metadata.
 /// Unique pages projected without `data` skip OCR reads. Canonical aliases are
-/// read even for metadata-only projections to verify byte-for-byte equality.
+/// read even for metadata-only projections to verify equality, allowing LF/CRLF.
 pub struct BhlPageAccessor<A> {
     storage: Arc<A>,
     snapshot_id: Arc<str>,
@@ -146,7 +146,10 @@ impl<A: ByteAccessor + 'static> ScanPlanner for BhlPageAccessor<A> {
         let snapshot = self.snapshot_id.clone();
         let partition_metadata = output.clone();
         let reconciliation_report = self.reconciliation_report.clone();
-        let partition = move |page| {
+        let completion = Arc::new(reconciliation::ScanCompletion::default());
+        let partition_completion = completion.clone();
+        let partition = move |page: BhlPageSelection| {
+            partition_completion.selected(&page.page.object);
             page_partition(
                 storage.clone(),
                 snapshot.clone(),
@@ -154,9 +157,10 @@ impl<A: ByteAccessor + 'static> ScanPlanner for BhlPageAccessor<A> {
                 request.byte_options,
                 partition_metadata.clone(),
                 reconciliation_report.clone(),
+                partition_completion.clone(),
             )
         };
-        let plan = match &self.metadata {
+        let mut plan = match &self.metadata {
             MetadataSource::Provider(provider) => {
                 let pages = request
                     .objects
@@ -203,6 +207,18 @@ impl<A: ByteAccessor + 'static> ScanPlanner for BhlPageAccessor<A> {
                 ScanPlan::from_stream(output, partitions).with_streaming_discovery()
             }
         };
+        // Discovery may finish before parallel OCR workers, or after the last
+        // sequential partition. Both paths enforce the same nonempty-output rule.
+        plan.partitions = plan
+            .partitions
+            .chain(
+                stream::once(async move {
+                    completion.discovery_finished()?;
+                    Ok(None)
+                })
+                .try_filter_map(future::ready),
+            )
+            .boxed();
         Ok(plan.with_ordering(OrderRequirement::Reorderable))
     }
 }
@@ -214,6 +230,7 @@ fn page_partition<A: ByteAccessor + 'static>(
     byte_options: ByteReadOptions,
     metadata: RecordMetadata,
     report: ReconciliationReport,
+    completion: Arc<reconciliation::ScanCompletion>,
 ) -> ScanPartition {
     scan_partition(async move {
         let batches = stream::once(read_page_batch(
@@ -223,7 +240,11 @@ fn page_partition<A: ByteAccessor + 'static>(
             byte_options,
             metadata.schema.clone(),
             report,
-        ));
+        ))
+        .try_filter_map(move |batch| {
+            let result = completion.completed(batch.is_some()).map(|()| batch);
+            future::ready(result)
+        });
         Ok(StreamReader::records(
             batches,
             metadata,
@@ -239,9 +260,15 @@ async fn read_page_batch<A: ByteAccessor>(
     byte_options: ByteReadOptions,
     output_schema: SchemaRef,
     report: ReconciliationReport,
-) -> Result<RecordBatch> {
+) -> Result<Option<RecordBatch>> {
     let data = if output_schema.field_with_name("data").is_ok() || selection.objects.len() > 1 {
-        reconciliation::read_canonical(storage.as_ref(), &selection, byte_options, &report).await?
+        let Some(data) =
+            reconciliation::read_canonical(storage.as_ref(), &selection, byte_options, &report)
+                .await?
+        else {
+            return Ok(None);
+        };
+        data
     } else {
         Default::default()
     };
@@ -263,4 +290,5 @@ async fn read_page_batch<A: ByteAccessor>(
         metadata: page.metadata,
     }
     .into_projected_batch(output_schema)
+    .map(Some)
 }

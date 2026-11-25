@@ -23,9 +23,11 @@ type MetadataReport = dyn Fn(&BhlPageMetadata) -> Result<()> + Send + Sync;
 ///
 /// Listing is scoped to each requested directory and consumes all listing pages.
 /// Only each directory's aggregate TXT object is excluded. Malformed identities,
-/// empty selections and conflicting metadata fail by default. Objects without
-/// a metadata-authoritative sequence are quarantined; byte-identical canonical
-/// aliases are deduplicated by the page reader.
+/// empty selections and conflicting metadata fail by default. Empty member
+/// directories are audited and skipped when other selected directories have pages. Objects without
+/// a metadata-authoritative sequence and groups with conflicting OCR content are
+/// quarantined; identical or LF/CRLF-equivalent aliases are deduplicated by the
+/// page reader. A selection with no surviving pages fails.
 ///
 /// Implements the native scan planner: pass this accessor directly to
 /// `CrawlAccessor::new`. The existing page planner retains projection pushdown,
@@ -144,7 +146,11 @@ impl<A: ByteAccessor + 'static> BhlShardAccessor<A> {
             BhlPageIdentity::parse(object.locator())?;
             keys.push(object);
         }
-        validation::nonempty_shard(&keys, prefix)?;
+        if keys.is_empty() {
+            (self.reconciliation_report)(&BhlPageReconciliation::EmptyShard {
+                prefix: prefix.to_owned(),
+            })?;
+        }
         Ok(keys)
     }
 }
@@ -197,6 +203,12 @@ impl<A: ByteAccessor + 'static> ScanPlanner for BhlShardAccessor<A> {
         let mut listings = stream::iter(listings).buffered(request.listing_concurrency.get());
         while let Some(objects) = listings.try_next().await? {
             keys.extend(objects);
+        }
+        if keys.is_empty() {
+            return Err(error::invalid_pages(format!(
+                "BHL selection contains no page objects: {}",
+                request.prefixes.join(", ")
+            )));
         }
         // One selection table/join worker for the complete directory batch.
         // Only keys are collected here; OCR bodies remain independent partitions.
