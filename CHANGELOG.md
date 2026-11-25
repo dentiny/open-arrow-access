@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.21.8 - 2026-11-25
+
+- Add configurable CSV preamble skipping before header detection and schema inference.
+- Replace scalar Gutenberg file metadata `extent` and `modified` with `extent_values: List<UInt64>` and `modified_values: List<Utf8>`, preserving repeated declarations and validating numeric extents even when projected out. Consumers of these nested fields must update.
+- Release all eight public workspace crates at 0.21.8 with aligned internal dependency requirements.
+
 ## 0.21.7 - 2026-11-24
 
 - Normalize CourtListener bulk snapshots to one DuckDB schema, including document joins and validation.
