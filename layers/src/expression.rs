@@ -1,22 +1,29 @@
-use std::{
-    collections::{HashMap, HashSet},
-    ops::ControlFlow,
-    sync::Arc,
-};
+use std::sync::Arc;
 
+#[cfg(feature = "schema-evolution")]
 use arrow_array::{ArrayRef, RecordBatch};
-use arrow_schema::{ArrowError, FieldRef, Schema, SchemaRef};
+use arrow_schema::FieldRef;
+#[cfg(feature = "schema-evolution")]
+use arrow_schema::{ArrowError, Schema, SchemaRef};
 use datafusion::{
     common::DFSchema,
-    error::DataFusionError,
     execution::{SessionState, context::SessionContext},
     logical_expr::Expr,
     optimizer::simplify_expressions::{ExprSimplifier, SimplifyContext},
     physical_expr::PhysicalExpr,
+};
+#[cfg(feature = "schema-evolution")]
+use datafusion::{
+    error::DataFusionError,
     sql::planner::IdentNormalizer,
     sql::sqlparser::ast::{
         Expr as SqlExpr, FunctionArg, FunctionArgExpr, FunctionArguments, Ident, Visit, Visitor,
     },
+};
+#[cfg(feature = "schema-evolution")]
+use std::{
+    collections::{HashMap, HashSet},
+    ops::ControlFlow,
 };
 
 pub(crate) struct CompiledExpression {
@@ -24,6 +31,7 @@ pub(crate) struct CompiledExpression {
     pub output: FieldRef,
 }
 
+#[cfg(feature = "schema-evolution")]
 pub(crate) struct PlannedExpression {
     pub(crate) expression: Arc<dyn PhysicalExpr>,
     pub(crate) output: FieldRef,
@@ -32,6 +40,7 @@ pub(crate) struct PlannedExpression {
 
 /// A compact dependency schema paired with the array slots in exactly its field order.
 /// Rebinding changes only the slots; physical expression column indices stay compact.
+#[cfg(feature = "schema-evolution")]
 pub(crate) struct ExpressionInput {
     schema: SchemaRef,
     /// Array slot for each field in `schema`, in the same order. Initially these
@@ -41,6 +50,7 @@ pub(crate) struct ExpressionInput {
     slots: Vec<usize>,
 }
 
+#[cfg(feature = "schema-evolution")]
 impl ExpressionInput {
     fn new(
         fields: &[FieldRef],
@@ -141,6 +151,7 @@ impl ExpressionPlanner {
     }
 
     /// Bind an Expr to a compact view of the current namespace.
+    #[cfg(feature = "schema-evolution")]
     pub(crate) fn plan_expr(
         &self,
         expression: &Expr,
@@ -163,6 +174,7 @@ impl ExpressionPlanner {
         })
     }
 
+    #[cfg(feature = "schema-evolution")]
     pub(crate) fn plan_sql(
         &self,
         expression: &str,
@@ -207,6 +219,7 @@ impl ExpressionPlanner {
     }
 }
 
+#[cfg(feature = "schema-evolution")]
 struct ColumnCandidates<'a> {
     names: &'a HashMap<String, usize>,
     indices: HashSet<usize>,
@@ -214,6 +227,7 @@ struct ColumnCandidates<'a> {
     wildcard: bool,
 }
 
+#[cfg(feature = "schema-evolution")]
 impl ColumnCandidates<'_> {
     fn insert(&mut self, ident: &Ident) {
         let name = IdentNormalizer::new(self.normalize).normalize(ident.clone());
@@ -223,6 +237,7 @@ impl ColumnCandidates<'_> {
     }
 }
 
+#[cfg(feature = "schema-evolution")]
 impl Visitor for ColumnCandidates<'_> {
     type Break = ();
 
@@ -262,7 +277,7 @@ impl Visitor for ColumnCandidates<'_> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "schema-evolution"))]
 mod tests {
     use super::*;
     use arrow_array::{Array, Int64Array, RecordBatch};

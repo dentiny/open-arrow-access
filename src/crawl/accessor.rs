@@ -36,7 +36,9 @@ impl<Q: ReadOptionsProvider + 'static> CrawlAccessor<Q> {
     where
         A: ScanPlanner<Request = Q> + 'static,
     {
-        let records = source.layer(options.evolution).layer(options.parallel_read);
+        #[cfg(feature = "layer-schema-evolution")]
+        let source = source.layer(options.evolution);
+        let records = source.layer(options.parallel_read);
         let mut inner: Arc<dyn Accessor<Request = Q, Reader = dyn RecordReader>> =
             match options.emission {
                 EmissionPolicy::Ordered => Arc::new(records),

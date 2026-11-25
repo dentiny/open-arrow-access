@@ -120,3 +120,11 @@ cargo test -p open-arrow-access-storage --locked
 
 Plain `cargo test` does not select every workspace member or enable optional
 formats. Use the workspace command above for complete coverage.
+
+## Layer tests
+
+Run the complete layer behavior suite with:
+
+```sh
+cargo test -p open-arrow-access-layers --all-features --locked
+```

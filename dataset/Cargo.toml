@@ -33,7 +33,10 @@ open-arrow-access-file-format = { path = "../file-format", default-features = fa
     "parquet",
     "warc",
 ] }
-open-arrow-access-layers.workspace = true
+open-arrow-access-layers = { workspace = true, features = [
+    "parallel-read",
+    "unordered-emission",
+] }
 open-arrow-access-storage.workspace = true
 open-arrow-access-test-support.workspace = true
 parquet.workspace = true

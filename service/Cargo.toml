@@ -73,7 +73,7 @@ pmc = [
 regulations = []
 semantic-scholar = [
     "open-arrow-access-file-format/json",
-    "dep:open-arrow-access-layers",
+    "open-arrow-access-layers/schema-evolution",
 ]
 uspto = []
 warc = ["open-arrow-access-file-format/warc"]
@@ -129,7 +129,10 @@ open-arrow-access-file-format = { path = "../file-format", default-features = fa
     "json",
     "parquet",
 ] }
-open-arrow-access-layers.workspace = true
+open-arrow-access-layers = { workspace = true, features = [
+    "parallel-read",
+    "missing-object",
+] }
 
 arrow-array.workspace = true
 arrow-schema.workspace = true

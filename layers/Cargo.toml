@@ -7,26 +7,62 @@ repository.workspace = true
 description = "Composable Arrow record layers for Open Arrow Access"
 
 [features]
-# Explicit byte adapter for stored frame offsets; existing decompression stays unchanged.
-source-positions = ["dep:async-compression"]
+all = [
+    "attachment-fallback",
+    "coalesce-batches",
+    "filter",
+    "limit",
+    "metrics",
+    "missing-object",
+    "parallel-read",
+    "prefetch",
+    "sampling",
+    "schema-evolution",
+    "source-columns",
+    "source-positions",
+    "unordered-emission",
+]
+attachment-fallback = []
+coalesce-batches = ["dep:arrow-select"]
+default = []
+filter = ["dep:arrow-cast", "dep:arrow-select", "dep:datafusion"]
+limit = []
+metrics = []
+missing-object = ["parallel-read"]
+parallel-read = ["dep:tokio"]
+prefetch = ["dep:tokio"]
+sampling = ["dep:arrow-select"]
+schema-evolution = [
+    "dep:arrow-buffer",
+    "dep:arrow-cast",
+    "dep:datafusion",
+    "datafusion/sql",
+    "dep:indexmap",
+    "arrow-array/chrono-tz",
+]
+source-columns = []
+# Explicit byte adapter for stored frame offsets.
+source-positions = ["source-columns", "dep:async-compression"]
+# Emission policies use the shared partition executor.
+unordered-emission = ["parallel-read"]
 
 [dependencies]
-arrow-array = { workspace = true, features = ["chrono-tz"] }
-arrow-buffer.workspace = true
-arrow-cast.workspace = true
+arrow-array.workspace = true
+arrow-buffer = { workspace = true, optional = true }
+arrow-cast = { workspace = true, optional = true }
 arrow-schema.workspace = true
-arrow-select.workspace = true
+arrow-select = { workspace = true, optional = true }
 async-compression = { workspace = true, optional = true, features = [
     "gzip",
     "bzip2",
     "zstd",
     "lz4",
 ] }
-datafusion = { workspace = true, features = ["sql"] }
+datafusion = { workspace = true, optional = true }
 futures.workspace = true
-indexmap.workspace = true
+indexmap = { workspace = true, optional = true }
 open-arrow-access-core.workspace = true
-tokio = { workspace = true, features = ["sync"] }
+tokio = { workspace = true, optional = true, features = ["sync"] }
 
 [dev-dependencies]
 more-asserts.workspace = true
@@ -42,6 +78,40 @@ workspace = true
 
 [[test]]
 name = "schema_evolution"
+required-features = ["schema-evolution"]
 
 [[test]]
 name = "schema_evolution_sql"
+required-features = ["schema-evolution", "parallel-read"]
+
+[[test]]
+name = "nested_field_removal"
+required-features = ["schema-evolution"]
+
+[[test]]
+name = "filter"
+required-features = ["filter"]
+
+[[test]]
+name = "limit"
+required-features = ["limit"]
+
+[[test]]
+name = "parallel_read"
+required-features = ["parallel-read", "unordered-emission"]
+
+[[test]]
+name = "prefetch"
+required-features = ["prefetch"]
+
+[[test]]
+name = "sampling"
+required-features = ["sampling"]
+
+[[test]]
+name = "source_columns"
+required-features = ["source-columns"]
+
+[[test]]
+name = "source_positions"
+required-features = ["source-positions"]

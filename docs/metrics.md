@@ -1,5 +1,8 @@
 # Read metrics
 
+Enable `layer-metrics` on the facade (or `metrics` on the layers crate) for the
+`layers::MetricsLayer` re-export. The core metrics API remains always available.
+
 `MetricsLayer` observes byte and record accessors without changing output,
 metadata, capabilities, ordering, or bulk-range optimizations. It also delegates
 listing, statistics and lazy scan planning when the source supports them.

@@ -83,7 +83,7 @@ fn file_storage(
 /// inspection. The returned [`crate::file_format::FileAccessor`] retains the
 /// format's [`crate::ScanPlanner`] implementation and partition options. It can
 /// be passed to [`crate::PreparedSource::prepare_plannable`] or composed with
-/// record layers such as [`crate::layers::ParallelReadLayer`]. Planning may
+/// record layers such as `crate::layers::ParallelReadLayer` (feature `layer-parallel-read`). Planning may
 /// inspect input; partition readers remain independently owned and lazy.
 ///
 /// This utility is always available; enable the chosen format through its existing

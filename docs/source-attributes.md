@@ -1,5 +1,8 @@
 # Source attributes and scan planning
 
+Enable `layer-source-columns` on the facade (or `source-columns` on the layers
+crate) to use the source column adapter.
+
 Status: the runtime now implements `ScanPlanner`, ordered parallel execution,
 typed `RecordCapability` with mandatory `ordering`, and `ScanPlan::ordering`; see [parallel reading](parallel-read.md).
 Every record adapter must declare its capability; the former optional/default

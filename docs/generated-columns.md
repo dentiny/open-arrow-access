@@ -2,9 +2,10 @@
 
 `SchemaEvolutionLayer` adds computed Arrow fields using row-level DataFusion
 SQL or `Expr` inputs alongside ordered remove, rename and cast operations. It is
-always available through `open_arrow_access::layers` and
-`open-arrow-access-layers`, including with `default-features = false`.
-Core remains Arrow-only; the layers crate depends on DataFusion.
+available through `open_arrow_access::layers` with `layer-schema-evolution`, or
+through `open-arrow-access-layers` with `schema-evolution`. Both crates have empty
+default features. This layer enables DataFusion and SQL; layers such as limits and
+sampling do not require them.
 
 ```rust,ignore
 use open_arrow_access::{AccessorExt, layers::{ColumnEvolution, SchemaEvolutionLayer}};
