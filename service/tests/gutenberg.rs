@@ -357,3 +357,125 @@ async fn books_validate_projection_before_io_and_rdf_before_files() {
     assert_eq!(reader.next().await.unwrap_err().kind(), ErrorKind::Decode);
     assert!(files_observed.requests.lock().unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn mirror_books_keep_advertised_uris_and_payload_bytes() {
+    use open_arrow_access_service::gutenberg::{
+        GutenbergBookDecoder, GutenbergBooks, GutenbergMirror,
+    };
+    let raw = String::from_utf8(fixture!("gutenberg", "book.rdf").await)
+        .unwrap()
+        .replace(
+            "https://example.invalid/42.txt",
+            "https://www.gutenberg.org/files/42/42-0.txt",
+        )
+        .replace(
+            "https://example.invalid/42.zip",
+            "https://www.gutenberg.org/ebooks/42.epub.images",
+        );
+    let files = MemoryAccessor::new(b"\x00\xfforiginal bytes", 3);
+    let observed = files.observations.clone();
+    let books = GutenbergBooks::new(
+        MemoryAccessor::new(raw.as_bytes(), 17),
+        GutenbergBookDecoder::new(GutenbergMirror::new(files, "snapshot/")),
+    );
+    let options = ByteReadOptions {
+        io_concurrency: NonZeroUsize::new(2).unwrap(),
+        ..Default::default()
+    };
+    let mut reader = books
+        .open(request().with_byte_options(options))
+        .await
+        .unwrap();
+    let batch = reader.next().await.unwrap().unwrap();
+    assert_eq!(batch["raw_rdf"].as_binary::<i64>().value(0), raw.as_bytes());
+    let files = batch["files"].as_list::<i32>().value(0);
+    let files = files.as_struct();
+    assert_eq!(
+        files["uri"].as_string::<i32>().value(0),
+        "https://www.gutenberg.org/files/42/42-0.txt"
+    );
+    assert_eq!(
+        files["uri"].as_string::<i32>().value(1),
+        "https://www.gutenberg.org/ebooks/42.epub.images"
+    );
+    for bytes in files["data"].as_binary::<i64>().iter().flatten() {
+        assert_eq!(bytes, b"\x00\xfforiginal bytes");
+    }
+    let requests = observed.requests.lock().unwrap();
+    let expected = [
+        "snapshot/4/42/42-0.txt",
+        "snapshot/cache/epub/42/pg42-images.epub",
+        "snapshot/4/42/42-0.txt",
+    ];
+    assert_eq!(requests.len(), expected.len());
+    for (request, path) in requests.iter().zip(expected) {
+        assert_eq!(request.object.locator(), path);
+        assert_eq!(request.options, options);
+    }
+}
+
+#[tokio::test]
+async fn mirror_preserves_sequential_open_and_metadata_overrides() {
+    use open_arrow_access_core::{
+        ByteMetadata, ByteReadRequest, ByteReader, Capability, Error, Result, async_trait,
+    };
+    use open_arrow_access_service::gutenberg::GutenbergMirror;
+
+    // Implements Accessor alone: mirror routing does not need backend discovery.
+    struct SequentialOnly(MemoryAccessor);
+
+    #[async_trait]
+    impl Accessor for SequentialOnly {
+        type Request = ByteReadRequest;
+        type Reader = dyn ByteReader;
+
+        fn capability(&self) -> Capability {
+            self.0.capability()
+        }
+
+        async fn metadata(&self, request: ByteReadRequest) -> Result<ByteMetadata> {
+            self.0.metadata(request).await
+        }
+
+        async fn inspect_metadata(&self, _: ByteReadRequest) -> Result<Option<ByteMetadata>> {
+            Ok(None)
+        }
+
+        async fn open(&self, _: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
+            Err(Error::new(
+                ErrorKind::Unsupported,
+                "test",
+                "use sequential open",
+            ))
+        }
+
+        async fn open_sequential(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
+            self.0.open(request).await
+        }
+    }
+
+    let files = MemoryAccessor::new(b"bytes", 5)
+        .with_ranges()
+        .with_listing();
+    let mirror = GutenbergMirror::new(SequentialOnly(files), "");
+    let request = ByteReadRequest::new("https://www.gutenberg.org/cache/epub/42/pg42.txt");
+    assert!(!mirror.capability().list);
+    assert!(mirror.capability().read_with_range);
+    let metadata = mirror.metadata(request.clone()).await.unwrap();
+    assert_eq!(metadata.source.unwrap().locator(), "cache/epub/42/pg42.txt");
+    assert!(
+        mirror
+            .inspect_metadata(request.clone())
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(mirror.open(request.clone()).await.is_err());
+    let mut reader = mirror.open_sequential(request).await.unwrap();
+    assert_eq!(reader.next().await.unwrap().unwrap().as_ref(), b"bytes");
+    assert_eq!(
+        reader.metadata().source.as_ref().unwrap().locator(),
+        "cache/epub/42/pg42.txt"
+    );
+}

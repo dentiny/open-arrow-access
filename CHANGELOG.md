@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add `GutenbergMirror` to route advertised Gutenberg file URLs through caller-configured byte storage while preserving original metadata and sequential-open behavior.
+
 ## 0.21.9 - 2026-11-25
 
 - Preserve historical CourtListener filesystem paths and fall back to publisher download URLs (or NULL), avoiding document-stream failures without dropping opinions.

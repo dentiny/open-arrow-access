@@ -44,7 +44,7 @@ doab = ["oai"]
 federal-register = []
 figshare = []
 govinfo = []
-gutenberg = ["format-xml", "dep:chrono"]
+gutenberg = ["format-xml", "dep:chrono", "dep:percent-encoding"]
 hathifiles = []
 huggingface = [
     "opendal/services-hf",
