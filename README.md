@@ -120,7 +120,8 @@ fn main() -> open_arrow_access::Result<()> {
 ```
 
 `DuckDBParquetTable` exposes its `name`, `paths`, and `options` for caller
-configuration. `DuckDbDatabase::register_parquet` and
+configuration. Its public `validate()` checks parameters before I/O; `register()`
+always invokes it before registration. `DuckDbDatabase::register_parquet` and
 `register_parquet_with_options` remain convenience wrappers around the table object.
 Pass one filename, a list of filenames, or DuckDB-supported local/S3 globs.
 Names are single SQL identifiers in `main`; registration fails if the name

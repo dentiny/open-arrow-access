@@ -29,10 +29,8 @@ impl DuckDBParquetTable {
         }
     }
 
-    /// Register this view without importing rows. Remote files use the database's
-    /// cache policy; the view is shared with its cloned and pooled connections.
-    pub fn register(&self, database: &DuckDbDatabase) -> Result<()> {
-        let connection = database.managed_connection();
+    /// Validate the table name, source paths and supported URL schemes before I/O.
+    pub fn validate(&self) -> Result<()> {
         let invalid = |message| Error::new(ErrorKind::InvalidInput, "duckdb_parquet", message);
         if self.name.is_empty() || self.name.contains('\0') {
             return Err(invalid(
@@ -44,34 +42,41 @@ impl DuckDBParquetTable {
                 "Parquet registration requires at least one file or glob",
             ));
         }
-        let mut remote = false;
-        let mut literals = Vec::with_capacity(self.paths.len());
         for path in &self.paths {
-            let path = path.as_str();
             if path.is_empty() || path.contains('\0') {
                 return Err(invalid("Parquet paths must be nonempty and contain no NUL"));
             }
-            if let Ok(url) = url::Url::parse(path)
-                && path.contains("://")
-                && !std::path::Path::new(path).is_absolute()
+            if let Some(url) = Self::source_url(path)
+                && !matches!(url.scheme(), "http" | "https" | "s3" | "file")
             {
-                match url.scheme() {
-                    "http" | "https" | "s3" => remote = true,
-                    "file" => (),
-                    _ => {
-                        return Err(Error::new(
-                            ErrorKind::Unsupported,
-                            "duckdb_parquet",
-                            "remote Parquet URLs must use HTTP(S) or S3 through cache_httpfs",
-                        ));
-                    }
-                }
+                return Err(Error::new(
+                    ErrorKind::Unsupported,
+                    "duckdb_parquet",
+                    "remote Parquet URLs must use HTTP(S) or S3 through cache_httpfs",
+                ));
             }
-            literals.push(format!("'{}'", path.replace('\'', "''")));
         }
-        if remote {
+        Ok(())
+    }
+
+    /// Register this view without importing rows. Remote files use the database's
+    /// cache policy; the view is shared with its cloned and pooled connections.
+    pub fn register(&self, database: &DuckDbDatabase) -> Result<()> {
+        self.validate()?;
+        let connection = database.managed_connection();
+        if self
+            .paths
+            .iter()
+            .filter_map(|path| Self::source_url(path))
+            .any(|url| url.scheme() != "file")
+        {
             connection.configure_remote_cache()?;
         }
+        let literals: Vec<_> = self
+            .paths
+            .iter()
+            .map(|path| format!("'{}'", path.replace('\'', "''")))
+            .collect();
         // CREATE VIEW does not support bound file parameters. Quote identifiers and
         // string literals separately, keeping caller paths out of SQL syntax.
         let table = self.name.replace('"', "\"\"");
@@ -84,5 +89,13 @@ impl DuckDBParquetTable {
                 self.options.hive_partitioning
             ))
             .map_err(error::database)
+    }
+
+    fn source_url(path: &str) -> Option<url::Url> {
+        if path.contains("://") && !std::path::Path::new(path).is_absolute() {
+            url::Url::parse(path).ok()
+        } else {
+            None
+        }
     }
 }
