@@ -16,6 +16,14 @@ pub enum BhlPageReconciliation {
         missing: Vec<String>,
         conflicts: Vec<String>,
     },
+    /// Parent ItemID relationships contradict the selected OCR identity.
+    /// No member of the canonical group is read or emitted with wrong metadata.
+    ConflictingMetadata {
+        canonical: ObjectRef,
+        aliases: Vec<ObjectRef>,
+        missing: Vec<String>,
+        conflicts: Vec<String>,
+    },
     /// No alias is emitted when canonical OCR bodies disagree.
     ConflictingPayloads {
         canonical: ObjectRef,

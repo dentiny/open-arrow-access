@@ -23,10 +23,11 @@ type MetadataReport = dyn Fn(&BhlPageMetadata) -> Result<()> + Send + Sync;
 ///
 /// Listing is scoped to each requested directory and consumes all listing pages.
 /// Only each directory's aggregate TXT object is excluded. Malformed identities,
-/// empty selections and conflicting metadata fail by default. Empty member
-/// directories are audited and skipped when other selected directories have pages. Objects without
-/// a metadata-authoritative sequence and groups with conflicting OCR content are
-/// quarantined; identical or LF/CRLF-equivalent aliases are deduplicated by the
+/// empty selections and missing required metadata fail by default. Empty member
+/// directories are audited and skipped when other selected directories have pages.
+/// Objects without a metadata-authoritative sequence and groups with contradictory
+/// parent metadata or conflicting OCR content are quarantined; identical or
+/// LF/CRLF-equivalent aliases are deduplicated by the
 /// page reader. A selection with no surviving pages fails.
 ///
 /// Implements the native scan planner: pass this accessor directly to
@@ -110,7 +111,7 @@ impl<A: ByteAccessor + 'static> BhlShardAccessor<A> {
         Ok(self)
     }
 
-    /// Replace strict metadata validation for each canonical page, before its
+    /// Replace strict metadata validation for each surviving canonical page, before its
     /// OCR read or emission. Ok retains it; an error stops the scan. Quarantine
     /// and byte verification are independent of this policy.
     pub fn with_report(
