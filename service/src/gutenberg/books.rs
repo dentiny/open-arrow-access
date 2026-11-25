@@ -14,7 +14,8 @@ use super::{GutenbergDecoder, error::decode_source, metadata};
 
 /// Metadata schema plus `raw_rdf: LargeBinary` and `files[].data: LargeBinary`.
 /// All original files retain their advertised URI, MIME types, extent and order.
-/// Binary values are ordinary Arrow values, not Lance blob extension markers.
+/// Both payload leaves carry `open-arrow-sink:blob=true`. Their Arrow type stays
+/// LargeBinary; the sink owns conversion to its native blob representation.
 pub fn book_schema() -> SchemaRef {
     static SCHEMA: OnceLock<SchemaRef> = OnceLock::new();
     SCHEMA
@@ -28,20 +29,23 @@ pub fn book_schema() -> SchemaRef {
                 unreachable!()
             };
             let mut children = children.to_vec();
-            children.push(Arc::new(Field::new("data", DataType::LargeBinary, false)));
+            children.push(Arc::new(blob_field("data")));
             *files = Arc::new(Field::new_list(
                 "files",
                 Field::new_struct("item", children, false),
                 false,
             ));
-            fields.push(Arc::new(Field::new(
-                "raw_rdf",
-                DataType::LargeBinary,
-                false,
-            )));
+            fields.push(Arc::new(blob_field("raw_rdf")));
             Arc::new(Schema::new(fields))
         })
         .clone()
+}
+
+// Use the sink's public metadata contract without depending on a writer crate.
+// Apply it to the nested array fields too: their DataType must match the schema.
+fn blob_field(name: &str) -> Field {
+    Field::new(name, DataType::LargeBinary, false)
+        .with_metadata([("open-arrow-sink:blob".into(), "true".into())].into())
 }
 
 /// Whole-book view using the shared document reader's lazy I/O and scan plan.
@@ -108,7 +112,7 @@ where
                         );
                     }
                     let mut fields = entries.fields().to_vec();
-                    fields.push(Arc::new(Field::new("data", DataType::LargeBinary, false)));
+                    fields.push(Arc::new(blob_field("data")));
                     let mut values = entries.columns().to_vec();
                     values.push(Arc::new(LargeBinaryArray::from_iter_values(
                         payloads.iter(),

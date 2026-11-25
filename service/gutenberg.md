@@ -206,6 +206,29 @@ files: List<Struct<
 >>
 ```
 
+### Blob fields passed to open-arrow-sink
+
+`book_schema()` marks exactly these binary payload leaves with Arrow field
+metadata `open-arrow-sink:blob = "true"`:
+
+| Field | Payload |
+| --- | --- |
+| `files[].data` | Every advertised original file, including TXT, HTML, PDF, EPUB, images and unknown formats |
+| `raw_rdf` | The complete original RDF catalogue document, including unmapped properties |
+
+Pass the reader's schema and batches unchanged to `open-arrow-sink`. Its Lance
+sink discovers the markers recursively through the `files` list/struct and
+converts the leaves to native logical Blob values. The source still emits
+`LargeBinary` bytes; it does not construct a Lance extension type or choose
+inline/packed/dedicated storage. Nested array fields carry the same metadata as
+the declared schema, including after projection.
+
+`files[].uri`, MIME types, sizes and all typed book metadata remain ordinary
+fields. The URI is provenance for bytes already read, not another blob to
+download. Do not select these binary payload paths with `DownloadBlobLayer`,
+which selects text URL fields. The metadata-only `schema()` is unchanged and
+does not opt any file links into downloads.
+
 `GutenbergBooks::new(rdf_storage, GutenbergBookDecoder::new(file_storage))`
 uses the shared `DocumentAccessor` and reads the RDF on consumption
 from `request.object`. It passes every advertised `files[].uri` unchanged to
