@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Distinguish source blob bytes (`open-arrow-sink:blob=bytes`) from selected source URIs (`uri`) with shared annotation helpers and mark original binary/archive, arXiv, BHL, MECA, Gutenberg and WARC payloads plus selected PMC/CourtListener download URLs. Preserve filenames, metadata links, typed text and WARC BinaryView buffers; document the sink BinaryView compatibility requirement.
+
 - Add Gutenberg whole-book Arrow rows retaining every advertised file's original bytes, MIME types and URI, plus exact RDF metadata for unmapped fields. Keep the metadata-only schema unchanged.
 
 ## 0.21.6 - 2026-11-24

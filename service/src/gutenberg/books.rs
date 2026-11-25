@@ -1,5 +1,6 @@
 //! One book with every advertised original file, without format conversion.
 
+use open_arrow_access_core::blob_bytes_field;
 use std::sync::{Arc, OnceLock};
 
 use arrow_array::{Array, ArrayRef, LargeBinaryArray, ListArray, StructArray, cast::AsArray};
@@ -14,7 +15,8 @@ use super::{GutenbergDecoder, error::decode_source, metadata};
 
 /// Metadata schema plus `raw_rdf: LargeBinary` and `files[].data: LargeBinary`.
 /// All original files retain their advertised URI, MIME types, extent and order.
-/// Binary values are ordinary Arrow values, not Lance blob extension markers.
+/// Both payload leaves carry `open-arrow-sink:blob=bytes`. Their Arrow type stays
+/// LargeBinary; the sink owns conversion to its native blob representation.
 pub fn book_schema() -> SchemaRef {
     static SCHEMA: OnceLock<SchemaRef> = OnceLock::new();
     SCHEMA
@@ -28,17 +30,21 @@ pub fn book_schema() -> SchemaRef {
                 unreachable!()
             };
             let mut children = children.to_vec();
-            children.push(Arc::new(Field::new("data", DataType::LargeBinary, false)));
+            children.push(Arc::new(blob_bytes_field(Field::new(
+                "data",
+                DataType::LargeBinary,
+                false,
+            ))));
             *files = Arc::new(Field::new_list(
                 "files",
                 Field::new_struct("item", children, false),
                 false,
             ));
-            fields.push(Arc::new(Field::new(
+            fields.push(Arc::new(blob_bytes_field(Field::new(
                 "raw_rdf",
                 DataType::LargeBinary,
                 false,
-            )));
+            ))));
             Arc::new(Schema::new(fields))
         })
         .clone()
@@ -108,7 +114,11 @@ where
                         );
                     }
                     let mut fields = entries.fields().to_vec();
-                    fields.push(Arc::new(Field::new("data", DataType::LargeBinary, false)));
+                    fields.push(Arc::new(blob_bytes_field(Field::new(
+                        "data",
+                        DataType::LargeBinary,
+                        false,
+                    ))));
                     let mut values = entries.columns().to_vec();
                     values.push(Arc::new(LargeBinaryArray::from_iter_values(
                         payloads.iter(),

@@ -18,6 +18,7 @@ pub use format::PmcFormat;
 pub use inventory::{PmcInventoryShardAccessor, PmcInventoryShardRequest};
 
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
+use open_arrow_access_core::blob_uri_field;
 use std::{
     collections::HashMap,
     sync::{Arc, OnceLock},
@@ -51,7 +52,11 @@ pub fn schema() -> SchemaRef {
                 Field::new("mid", DataType::Utf8, true),
             ];
             // A selected URL is an output convenience, not an upstream metadata field.
-            fields.push(Field::new("content_url", DataType::Utf8, true));
+            fields.push(blob_uri_field(Field::new(
+                "content_url",
+                DataType::Utf8,
+                true,
+            )));
             Arc::new(Schema::new_with_metadata(
                 fields,
                 HashMap::from([("pmc.row_kind".into(), "article_metadata".into())]),

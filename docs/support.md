@@ -152,3 +152,8 @@ one metadata page at a time; callers own continuation, pacing, and retry policy.
 
 `layers/` includes schema evolution with computed columns. Backend-specific OpenDAL layers can already be configured on the
 operator; they are distinct from this project's accessor layers.
+
+## Source payload annotations
+
+See [source blob fields](blob-fields.md) for the exact annotated payload/URL paths,
+caller-owned schema boundaries and WARC BinaryView sink compatibility.

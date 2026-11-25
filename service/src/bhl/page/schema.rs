@@ -1,5 +1,6 @@
 use arrow_schema::{DataType, Field, Schema};
 use open_arrow_access_core::SchemaRef;
+use open_arrow_access_core::blob_bytes_field;
 use std::sync::{Arc, OnceLock};
 
 // Fixed BHL TSV source schema. Every cell retains its original lexical string.
@@ -187,7 +188,7 @@ pub fn page_schema() -> SchemaRef {
                 Field::new("entity_id", DataType::UInt64, false),
                 Field::new("page_id", DataType::UInt64, false),
                 Field::new("sequence", DataType::UInt64, false),
-                Field::new("data", DataType::LargeBinary, false),
+                blob_bytes_field(Field::new("data", DataType::LargeBinary, false)),
                 Field::new("source_path", DataType::LargeUtf8, false),
                 Field::new("snapshot_id", DataType::Utf8, false),
                 Field::new("source_entry_index", DataType::UInt64, true),

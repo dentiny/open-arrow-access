@@ -81,7 +81,8 @@ provider storage; request-specific schema and projection errors occur on open.
 Top-level JSON arrays/scalars are rejected, matching the existing `JsonFormat`;
 the entry point does not flatten them or follow metadata links.
 
-`AttachmentOptions::default()` selects `Binary`. Binary input includes empty
+`AttachmentOptions::default()` selects `Binary`. Its `data` field carries the
+[shared blob-input annotation](blob-fields.md) for blob-aware sinks. Binary input includes empty
 objects, invalid UTF-8 and compressed bytes: a `.gz` filename does not cause
 decompression. The entire object is buffered on first consumption. An empty
 projection still yields one row. Configuring binary mode with outer compression

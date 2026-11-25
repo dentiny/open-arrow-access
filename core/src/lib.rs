@@ -5,6 +5,7 @@ mod async_read;
 mod async_seek;
 mod attachment_cell;
 mod binary;
+mod blob;
 mod bound_source;
 mod byte_position;
 mod capability;
@@ -41,6 +42,10 @@ pub use async_read::into_async_read;
 pub use async_seek::{SeekableInput, into_async_seek};
 pub use attachment_cell::{AttachmentCell, AttachmentCellAccessor, AttachmentDataType};
 pub use binary::BinaryDecoder;
+pub use blob::{
+    BLOB_BYTES_VALUE, BLOB_METADATA_KEY, BLOB_METADATA_VALUE, BLOB_URI_VALUE, blob_bytes_field,
+    blob_uri_field,
+};
 pub use bound_source::BoundSource;
 pub use byte_position::BytePosition;
 pub use capability::{Capability, OrderRequirement, RecordCapability};

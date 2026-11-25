@@ -147,7 +147,7 @@ snapshot to each PDF before emitting Arrow batches. Pass
 The output retains the four bulk columns listed below and adds a non-null `metadata`
 struct containing **every column** of the snapshot with its original Arrow type.
 Write these batches to one Lance dataset with the original binary `data` column.
-Lance Blob V2 storage is a separate sink configuration contract; a URL-download
+The `data` field carries the shared blob-input annotation for the sink. A URL-download
 blob option is not a selector for already-materialized PDF bytes.
 No second metadata table or metadata fetch per PDF is required.
 
