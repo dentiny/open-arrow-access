@@ -30,6 +30,7 @@ bhl = [
 ]
 biorxiv = ["meca", "dep:chrono"]
 courtlistener = [
+    "arrow-array/chrono-tz",
     "dep:open-arrow-access-decompression",
     "open-arrow-access-decompression/bz2",
     "dep:arrow-cast",

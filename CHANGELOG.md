@@ -5,7 +5,7 @@
 ## 0.21.9 - 2026-11-25
 
 - Preserve historical CourtListener filesystem paths and fall back to publisher download URLs (or NULL), avoiding document-stream failures without dropping opinions.
-- Validate CourtListener parallel CSV record boundaries using explicit source types.
+- Validate CourtListener parallel CSV record boundaries using explicit source types; enable its UTC timezone parsing dependency independently of optional layers.
 - Reconcile identical BHL OCR aliases and quarantine unmatched pages.
 - Register external Parquet tables in DuckDB using shared caching.
 - Make built-in layers opt-in Cargo features. Enable individual `layer-*` features, `crawl` for crawl composition, or `layers-all` for every built-in layer; direct layers-crate users must enable the corresponding unprefixed features.
