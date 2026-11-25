@@ -82,11 +82,11 @@ impl DuckDBParquetTable {
         let table = self.name.replace('"', "\"\"");
         connection
             .execute_batch(&format!(
-                "CREATE VIEW main.\"{table}\" AS SELECT * FROM read_parquet([{}],
-                 union_by_name = {}, hive_partitioning = {});",
-                literals.join(","),
-                self.options.union_by_name,
-                self.options.hive_partitioning
+                include_str!("create_parquet_view.sql"),
+                table = table,
+                paths = literals.join(","),
+                union_by_name = self.options.union_by_name,
+                hive_partitioning = self.options.hive_partitioning
             ))
             .map_err(error::database)
     }
