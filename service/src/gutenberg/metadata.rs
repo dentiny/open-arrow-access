@@ -83,15 +83,22 @@ fn convert_fields<'m>(
                             )?;
                         }
                     }
-                } else if let Some(row) = row.as_deref_mut() {
-                    row.append_list(
-                        name,
-                        values
-                            .as_string::<i32>()
-                            .iter()
-                            .flatten()
-                            .filter(|s| !s.is_empty()),
-                    )?;
+                } else {
+                    let texts = values
+                        .as_string::<i32>()
+                        .iter()
+                        .flatten()
+                        .filter(|s| !s.is_empty());
+                    if matches!(item.data_type(), DataType::UInt64) {
+                        let parsed = texts
+                            .map(|text| number::<u64>(text, name))
+                            .collect::<Result<Vec<_>>>()?;
+                        if let Some(row) = row.as_deref_mut() {
+                            row.append_list(name, parsed)?;
+                        }
+                    } else if let Some(row) = row.as_deref_mut() {
+                        row.append_list(name, texts)?;
+                    }
                 }
             }
             _ => {
@@ -125,21 +132,23 @@ fn scalar_value<'a>(
     }
     Ok(match field.data_type() {
         DataType::Utf8 | DataType::LargeUtf8 => text.into(),
-        DataType::UInt64 => number::<u64>(text, name)?.into(),
-        DataType::Int32 => number::<i32>(text, name)?.into(),
+        DataType::UInt64 => text
+            .map(|text| number::<u64>(text, name))
+            .transpose()?
+            .into(),
+        DataType::Int32 => text
+            .map(|text| number::<i32>(text, name))
+            .transpose()?
+            .into(),
         DataType::Date32 => text.map(parse_issued_date).transpose()?.into(),
         _ => unreachable!("unsupported Gutenberg metadata type"),
     })
 }
 
-fn number<T: std::str::FromStr>(value: Option<&str>, field: &str) -> Result<Option<T>> {
+fn number<T: std::str::FromStr>(value: &str, field: &str) -> Result<T> {
     value
-        .map(|value| {
-            value
-                .parse()
-                .map_err(|_| decode(format!("invalid {field}: {value:?}")))
-        })
-        .transpose()
+        .parse()
+        .map_err(|_| decode(format!("invalid {field}: {value:?}")))
 }
 
 pub(super) fn parse_ebook_id(about: &str) -> Result<FieldValue<'_>> {

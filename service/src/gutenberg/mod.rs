@@ -96,6 +96,12 @@ fn strings(name: &str, path: &str) -> Mapping {
     Mapping::new(xml.arrow_field().clone(), xml)
 }
 
+fn numbers(name: &str, path: &str) -> Mapping {
+    let mut mapping = strings(name, path);
+    mapping.field = Field::new_list(name, Field::new("item", DataType::UInt64, false), false);
+    mapping
+}
+
 fn objects(name: &str, path: &str, container: &str, mappings: Vec<Mapping>) -> Mapping {
     let fields: Vec<_> = mappings
         .iter()
@@ -166,8 +172,8 @@ fn definitions() -> &'static Definitions {
                 vec![
                     scalar("uri", "@r:about", Utf8, false),
                     strings("format", "d:format/r:Description/r:value"),
-                    scalar("extent", "d:extent", UInt64, true),
-                    scalar("modified", "d:modified", Utf8, true),
+                    numbers("extent_values", "d:extent"),
+                    strings("modified_values", "d:modified"),
                 ],
             ),
         ];

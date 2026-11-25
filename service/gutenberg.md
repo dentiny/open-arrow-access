@@ -200,8 +200,8 @@ raw_rdf: LargeBinary
 files: List<Struct<
   uri: Utf8,
   format: List<Utf8>,
-  extent: UInt64?,
-  modified: Utf8?,
+  extent_values: List<UInt64>,
+  modified_values: List<Utf8>,
   data: LargeBinary
 >>
 ```
@@ -315,7 +315,7 @@ creator: List<Struct<uri: Utf8?, name: Utf8?, alias: List<Utf8>, birthdate: Int3
 language, bookshelf: List<Utf8>
 subject: List<Struct<scheme: Utf8?, value: Utf8>>
 issued: Date32?
-files: List<Struct<uri: Utf8, format: List<Utf8>, extent: UInt64?, modified: Utf8?>>
+files: List<Struct<uri: Utf8, format: List<Utf8>, extent_values: List<UInt64>, modified_values: List<Utf8>>>
 ```
 
 Missing repeated values become empty lists; birth/death dates are years and
@@ -355,3 +355,15 @@ links; there is no `files[].data` column.
 Source: [Project Gutenberg machine-readable catalogue](https://www.gutenberg.org/ebooks/offline_catalogs.html).
 
 
+
+### Repeated RDF file properties
+
+Real catalogue entries can contain multiple `d:extent` and `d:modified` values
+for one `pgterms:file` (for example ebook 10399). `extent_values` and
+`modified_values` retain all nonempty declarations, including duplicates, in RDF
+order. These list fields replace the scalar `extent` and `modified` columns;
+there are no scalar aliases. Missing declarations produce empty lists, and single
+declarations produce one-element lists. The two lists are independent RDF
+properties, not paired versions. Malformed numeric extents still fail
+decoding even when the file metadata is projected out. Whole-book output also
+retains the exact original RDF and original payload bytes.
