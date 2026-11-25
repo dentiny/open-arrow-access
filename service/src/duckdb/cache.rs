@@ -1,12 +1,16 @@
 use open_arrow_access_core::{Error, ErrorKind, Result};
+use std::path::{Path, PathBuf};
 
 /// cache_httpfs policy shared by a DuckDB database and its cloned connections.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CachePolicy {
     /// Cache remote blocks in memory, bounded by `block_size * max_blocks` bytes.
     InMemory { block_size: u64, max_blocks: u64 },
     /// Cache remote blocks on disk, with an optional memory read-through cache.
     OnDisk {
+        /// Caller-owned cache directories, retained after connections close.
+        /// An empty list uses the connection-owned temporary cache directory.
+        directories: Vec<PathBuf>,
         block_size: u64,
         /// Number of memory blocks above the disk cache; zero disables this layer.
         max_in_memory_blocks: u64,
@@ -32,13 +36,14 @@ impl CachePolicy {
     /// read-through cache, and default free-space reservation.
     pub const fn on_disk() -> Self {
         Self::OnDisk {
+            directories: Vec::new(),
             block_size: 524288,
             max_in_memory_blocks: 256,
             min_free_disk_bytes: 0,
         }
     }
 
-    /// Validate block sizes and memory capacities before opening a connection.
+    /// Validate block sizes, memory capacities and directories before opening a connection.
     /// Disk mode permits zero memory blocks to disable its read-through cache.
     pub fn validate(&self) -> Result<()> {
         match *self {
@@ -60,8 +65,28 @@ impl CachePolicy {
             Self::OnDisk {
                 block_size,
                 max_in_memory_blocks,
+                ref directories,
                 ..
             } => {
+                for directory in directories {
+                    let value = directory.to_str().ok_or_else(|| {
+                        Error::new(
+                            ErrorKind::InvalidInput,
+                            "duckdb_cache",
+                            "cache directories must be UTF-8 paths",
+                        )
+                    })?;
+                    if value.is_empty()
+                        || value.contains('\0')
+                        || (directories.len() > 1 && value.contains(';'))
+                    {
+                        return Err(Error::new(
+                            ErrorKind::InvalidInput,
+                            "duckdb_cache",
+                            "cache directories must be nonempty without NUL; multiple directories cannot contain semicolons",
+                        ));
+                    }
+                }
                 if block_size == 0 || block_size.checked_mul(max_in_memory_blocks).is_none() {
                     return Err(Error::new(
                         ErrorKind::InvalidInput,
@@ -74,7 +99,7 @@ impl CachePolicy {
         Ok(())
     }
 
-    pub(super) fn sql(self) -> Result<String> {
+    pub(super) fn sql(&self, default_directory: &Path) -> Result<String> {
         self.validate()?;
         let settings = match self {
             Self::InMemory {
@@ -91,6 +116,7 @@ impl CachePolicy {
                 ]
             }
             Self::OnDisk {
+                directories,
                 block_size,
                 max_in_memory_blocks,
                 min_free_disk_bytes,
@@ -100,19 +126,40 @@ impl CachePolicy {
                     ("cache_httpfs_cache_block_size", block_size.to_string()),
                     (
                         "cache_httpfs_disk_cache_reader_enable_memory_cache",
-                        (max_in_memory_blocks != 0).to_string(),
+                        (*max_in_memory_blocks != 0).to_string(),
                     ),
                     (
                         "cache_httpfs_min_disk_bytes_for_cache",
                         min_free_disk_bytes.to_string(),
                     ),
                 ];
-                if max_in_memory_blocks != 0 {
+                if *max_in_memory_blocks != 0 {
                     settings.push((
                         "cache_httpfs_disk_cache_reader_mem_cache_block_count",
                         max_in_memory_blocks.to_string(),
                     ));
                 }
+                let paths: Vec<String> = if directories.is_empty() {
+                    vec![default_directory.to_string_lossy().into_owned()]
+                } else {
+                    directories
+                        .iter()
+                        .map(|path| path.to_string_lossy().into_owned())
+                        .collect()
+                };
+                let directory_config = if paths.len() > 1 {
+                    paths.join(";")
+                } else {
+                    String::new()
+                };
+                settings.push((
+                    "cache_httpfs_cache_directories_config",
+                    format!("'{}'", directory_config.replace('\'', "''")),
+                ));
+                settings.push((
+                    "cache_httpfs_cache_directory",
+                    format!("'{}'", paths[0].replace('\'', "''")),
+                ));
                 settings
             }
         };

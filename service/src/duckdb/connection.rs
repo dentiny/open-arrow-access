@@ -91,21 +91,27 @@ impl ManagedConnection {
         Ok(connection)
     }
 
-    /// The same scratch owner keeps spill files and cached remote blocks alive
-    /// until the final cloned connection closes. No full database copy is made.
+    /// Scratch storage is retained by clones. Caller-configured cache directories
+    /// are not removed on close. No full database copy is made.
     pub(crate) fn configure_remote_cache(&self) -> Result<()> {
-        let cache = self.directory.path().join("http-cache");
-        std::fs::create_dir_all(&cache).map_err(error::scratch)?;
-        // Database-level settings are shared by existing and future clones.
-        let policy = self.cache_policy.sql()?;
+        let default_directory = self.directory.path().join("http-cache");
+        let directories = match &self.cache_policy {
+            CachePolicy::OnDisk { directories, .. } if !directories.is_empty() => {
+                directories.as_slice()
+            }
+            CachePolicy::OnDisk { .. } => std::slice::from_ref(&default_directory),
+            CachePolicy::InMemory { .. } => &[],
+        };
+        for directory in directories {
+            std::fs::create_dir_all(directory).map_err(error::scratch)?;
+        }
+        // The policy owns all cache settings, including directory selection.
+        let policy = self.cache_policy.sql(&default_directory)?;
         self.connection
             .execute_batch(&format!(
                 "FORCE INSTALL cache_httpfs FROM community;
                  LOAD cache_httpfs;
-                 {policy}
-                 SET GLOBAL cache_httpfs_cache_directories_config = '';
-                 SET GLOBAL cache_httpfs_cache_directory = '{}';",
-                cache.to_string_lossy().replace('\'', "''")
+                 {policy}"
             ))
             .map_err(error::cache_setup)
     }
@@ -173,7 +179,7 @@ impl ManagedConnection {
         Ok(Self {
             connection,
             directory: self.directory.clone(),
-            cache_policy: self.cache_policy,
+            cache_policy: self.cache_policy.clone(),
         })
     }
 
