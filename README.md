@@ -132,15 +132,14 @@ view. The constructor takes a `CachePolicy`, shared by clones.
 `CachePolicy::default()` selects a 128 MiB memory cache; use
 `CachePolicy::InMemory { block_size, max_blocks }` to configure its capacity, or
 `CachePolicy::on_disk()` for the owned temporary on-disk cache. Use
-`CachePolicy::OnDisk { directories, block_size, max_in_memory_blocks, min_free_disk_bytes }`
-to control cache directories, the block size, its memory read-through capacity, and its
+`CachePolicy::OnDisk { directory, block_size, max_in_memory_blocks, min_free_disk_bytes }`
+to control the cache directory, the block size, its memory read-through capacity, and its
 free-disk eviction threshold. Memory capacity is `block_size * max_in_memory_blocks`;
 zero memory blocks disable the read-through layer. `min_free_disk_bytes = 0`
 retains the extension's default 5% reservation. The threshold reserves free disk
-space; cache_httpfs does not expose a hard maximum cache-directory size. An empty `directories` list uses the connection-owned temporary directory.
-One path sets `cache_httpfs_cache_directory`; multiple paths also set
-`cache_httpfs_cache_directories_config`. Caller-supplied directories persist
-after connections close. Registration preserves this connection policy. `CachePolicy::validate()` is also public;
+space; cache_httpfs does not expose a hard maximum cache-directory size. `directory: None` uses the connection-owned temporary directory.
+Set `directory: Some(PathBuf::from("/data/cache"))` to use a caller-owned directory,
+which persists after connections close. Registration preserves this connection policy. `CachePolicy::validate()` is also public;
 connection constructors validate the policy automatically. Local Parquet support is bundled and needs no
 extension download. Registration can read footers and list matching
 files; queries fetch needed columns/pages. Query intermediates may still spill
@@ -484,9 +483,9 @@ including for local paths. Script errors are redacted to avoid including credent
 remain temporary unless the script explicitly uses `CREATE PERSISTENT SECRET`.
 Cloned connections share secrets, the selected search path and cached remote
 blocks. Scratch and default cache directories are removed when the final
-connection closes; explicitly configured cache directories remain caller-owned.
-The shared loader applies `CachePolicy`, including single/multiple disk-cache
-directories, before ATTACH. There is no full-download fallback.
+connection closes; an explicitly configured cache directory remains caller-owned.
+The shared loader applies `CachePolicy`, including its single disk-cache
+directory, before ATTACH. There is no full-download fallback.
 A query that scans most of a database can still fetch most blocks on demand.
 The attached source is read-only; the control database and connection-local
 temporary objects remain writable. BHL consumes the same loader through

@@ -91,19 +91,13 @@ impl ManagedConnection {
         Ok(connection)
     }
 
-    /// Scratch storage is retained by clones. Caller-configured cache directories
-    /// are not removed on close. No full database copy is made.
+    /// Scratch storage is retained by clones. A caller-configured cache directory
+    /// is not removed on close. No full database copy is made.
     pub(crate) fn configure_remote_cache(&self) -> Result<()> {
         let default_directory = self.directory.path().join("http-cache");
-        let directories = match &self.cache_policy {
-            CachePolicy::OnDisk { directories, .. } if !directories.is_empty() => {
-                directories.as_slice()
-            }
-            CachePolicy::OnDisk { .. } => std::slice::from_ref(&default_directory),
-            CachePolicy::InMemory { .. } => &[],
-        };
-        for directory in directories {
-            std::fs::create_dir_all(directory).map_err(error::scratch)?;
+        if let CachePolicy::OnDisk { directory, .. } = &self.cache_policy {
+            std::fs::create_dir_all(directory.as_deref().unwrap_or(&default_directory))
+                .map_err(error::scratch)?;
         }
         // The policy owns all cache settings, including directory selection.
         let policy = self.cache_policy.sql(&default_directory)?;

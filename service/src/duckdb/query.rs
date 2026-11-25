@@ -65,7 +65,7 @@ impl DuckDbDatabase {
     /// explicitly requests persistence. cache_httpfs is force-installed from
     /// community and loaded on each connect; the supplied cache policy is applied
     /// before ATTACH, including local paths.
-    /// An on-disk cache uses caller-supplied directories or an owned temporary
+    /// An on-disk cache uses a caller-supplied directory or an owned temporary
     /// directory retained until the last cloned connection closes.
     /// Only requested blocks are fetched, with no full database download during opening.
     /// The caller can load the SQL from any source or construct it in memory.

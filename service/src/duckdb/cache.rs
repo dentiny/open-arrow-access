@@ -8,9 +8,9 @@ pub enum CachePolicy {
     InMemory { block_size: u64, max_blocks: u64 },
     /// Cache remote blocks on disk, with an optional memory read-through cache.
     OnDisk {
-        /// Caller-owned cache directories, retained after connections close.
-        /// An empty list uses the connection-owned temporary cache directory.
-        directories: Vec<PathBuf>,
+        /// Caller-owned cache directory, retained after connections close.
+        /// None uses the connection-owned temporary cache directory.
+        directory: Option<PathBuf>,
         block_size: u64,
         /// Number of memory blocks above the disk cache; zero disables this layer.
         max_in_memory_blocks: u64,
@@ -36,14 +36,14 @@ impl CachePolicy {
     /// read-through cache, and default free-space reservation.
     pub const fn on_disk() -> Self {
         Self::OnDisk {
-            directories: Vec::new(),
+            directory: None,
             block_size: 524288,
             max_in_memory_blocks: 256,
             min_free_disk_bytes: 0,
         }
     }
 
-    /// Validate block sizes, memory capacities and directories before opening a connection.
+    /// Validate block sizes, memory capacities and directory before opening a connection.
     /// Disk mode permits zero memory blocks to disable its read-through cache.
     pub fn validate(&self) -> Result<()> {
         match *self {
@@ -65,25 +65,22 @@ impl CachePolicy {
             Self::OnDisk {
                 block_size,
                 max_in_memory_blocks,
-                ref directories,
+                ref directory,
                 ..
             } => {
-                for directory in directories {
+                if let Some(directory) = directory {
                     let value = directory.to_str().ok_or_else(|| {
                         Error::new(
                             ErrorKind::InvalidInput,
                             "duckdb_cache",
-                            "cache directories must be UTF-8 paths",
+                            "cache directory must be a UTF-8 path",
                         )
                     })?;
-                    if value.is_empty()
-                        || value.contains('\0')
-                        || (directories.len() > 1 && value.contains(';'))
-                    {
+                    if value.is_empty() || value.contains('\0') {
                         return Err(Error::new(
                             ErrorKind::InvalidInput,
                             "duckdb_cache",
-                            "cache directories must be nonempty without NUL; multiple directories cannot contain semicolons",
+                            "cache directory must be nonempty without NUL",
                         ));
                     }
                 }
@@ -116,7 +113,7 @@ impl CachePolicy {
                 ]
             }
             Self::OnDisk {
-                directories,
+                directory,
                 block_size,
                 max_in_memory_blocks,
                 min_free_disk_bytes,
@@ -139,26 +136,12 @@ impl CachePolicy {
                         max_in_memory_blocks.to_string(),
                     ));
                 }
-                let paths: Vec<String> = if directories.is_empty() {
-                    vec![default_directory.to_string_lossy().into_owned()]
-                } else {
-                    directories
-                        .iter()
-                        .map(|path| path.to_string_lossy().into_owned())
-                        .collect()
-                };
-                let directory_config = if paths.len() > 1 {
-                    paths.join(";")
-                } else {
-                    String::new()
-                };
-                settings.push((
-                    "cache_httpfs_cache_directories_config",
-                    format!("'{}'", directory_config.replace('\'', "''")),
-                ));
+                let directory = directory.as_deref().unwrap_or(default_directory);
+                // Clear the native multi-directory override to honor the single directory.
+                settings.push(("cache_httpfs_cache_directories_config", "''".to_owned()));
                 settings.push((
                     "cache_httpfs_cache_directory",
-                    format!("'{}'", paths[0].replace('\'', "''")),
+                    format!("'{}'", directory.to_string_lossy().replace('\'', "''")),
                 ));
                 settings
             }
