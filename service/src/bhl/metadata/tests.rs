@@ -661,3 +661,30 @@ async fn managed_manifests_still_require_source_checksums() {
     drop(db);
     assert!(BhlMetadata::open(&path).is_err());
 }
+
+#[tokio::test]
+async fn canonical_aliases_across_join_batches_are_grouped_together_once() {
+    let metadata = load().await;
+    let canonical = ObjectRef::new("ocr/item-2/item-2-3-5.txt");
+    let alias = ObjectRef::new("ocr/item-2/item-2-0003-0005.txt");
+    let mut keys = vec![canonical.clone()];
+    keys.extend((10000..18191).map(|id| ObjectRef::new(format!("ocr/item-2/item-2-{id}-1.txt"))));
+    keys.push(alias.clone());
+    assert_eq!(keys.len(), 8193);
+    let mut canonical_groups = 0;
+    let mut quarantines = 0;
+    metadata
+        .for_each_selection(&keys, |selection| {
+            if selection.objects.is_empty() {
+                quarantines += 1;
+            } else {
+                canonical_groups += 1;
+                assert_eq!(selection.page.object, canonical);
+                assert_eq!(selection.objects, [canonical.clone(), alias.clone()]);
+            }
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(canonical_groups, 1);
+    assert_eq!(quarantines, 8191);
+}

@@ -190,6 +190,40 @@ async fn parent_conflicts_remain_strict_unless_overridden() {
 }
 
 #[tokio::test]
+async fn shard_reader_forwards_quarantine_and_verified_alias_events() {
+    let (_root, source) = fixture(&[
+        ("ocr/item-2/item-2-3-5.txt", b"same"),
+        ("ocr/item-2/item-2-0003-0005.txt", b"same"),
+        ("ocr/item-2/item-2-30-1.txt", b"orphan"),
+    ])
+    .await;
+    let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let sink = events.clone();
+    let source = source.with_reconciliation_report(move |event| {
+        sink.lock().unwrap().push(event.clone());
+        Ok(())
+    });
+    assert_eq!(
+        read(&source, BhlShardReadRequest::new("ocr/item-2/").unwrap())
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    let events = events.lock().unwrap();
+    assert_eq!(events.len(), 2);
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, crate::bhl::BhlPageReconciliation::Quarantined { .. }))
+    );
+    assert!(events.iter().any(|event| matches!(
+        event,
+        crate::bhl::BhlPageReconciliation::Deduplicated { .. }
+    )));
+}
+
+#[tokio::test]
 async fn selects_item_and_part_versions_without_reading_alternatives() {
     use arrow_array::types::UInt64Type;
 
