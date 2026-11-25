@@ -20,7 +20,7 @@ parsing is disabled. The script also builds the version-1 `__bhl_lookup_*`
 derived tables and indexes. To import only the raw tables, stop after the first
 `CHECKPOINT`, before the optional lookup-profile section. The lookup profile
 requires additional disk space and memory; rebuild it if the raw data changes.
-Raw import preserves source order before lookup tables capture row ordinals.
+Lookup ordinals capture the imported raw table order; TSV input order is not guaranteed.
 The lookup rows are clustered by numeric key and retain lexical values and duplicates.
 Each derived table commits before its ART index is bulk-built; the version marker
 is committed last. A failed build can leave partial objects: discard the unpublished

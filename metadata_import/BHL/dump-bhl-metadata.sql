@@ -1,7 +1,6 @@
 -- Run with DuckDB v1.5.6 and httpfs enabled, against a NEW database file.
 LOAD httpfs;
--- Preserve TSV source order before capturing rowid in the lookup tables.
-SET preserve_insertion_order = true;
+SET preserve_insertion_order = false;
 SET memory_limit = '8GiB';
 SET threads = 2;
 
