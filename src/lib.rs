@@ -1,8 +1,8 @@
 //! Composable, asynchronous read access to Arrow record batches.
 //!
 //! The shared extension contracts, OpenDAL storage adapter, service HTTP utilities,
-//! file-opening utilities, archive expansion, and record layers (including [`layers::SchemaEvolutionLayer`])
-//! are always available. Concrete providers remain opt-in.
+//! file-opening utilities and archive expansion are always available.
+//! Built-in record layers (`layer-*`), crawling (`crawl`) and concrete providers are opt-in.
 //! Enable a `format-parquet`, `format-json`, `format-csv`, `format-xml`, or
 //! `format-atif` reader to decode records.
 
@@ -13,6 +13,7 @@ mod blocking;
 #[cfg(feature = "blocking")]
 pub use blocking::BlockingRecordBatchReader;
 
+#[cfg(feature = "crawl")]
 pub mod crawl;
 
 mod archive;

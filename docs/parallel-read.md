@@ -1,5 +1,9 @@
 # Parallel reading and emission policies
 
+Enable `layer-parallel-read` on the facade (or `parallel-read` on the layers crate).
+For ready-batch emission, also enable `layer-unordered-emission` /
+`unordered-emission`, which includes the shared parallel executor.
+
 `ParallelReadLayer` runs independent partitions on Tokio tasks and defaults to
 emitting every partition in declared order. The executor also supports an
 explicit unordered emission policy when the entire source is reorderable. FileSet preserves explicit duplicates and selection order; Directory

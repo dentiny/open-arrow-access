@@ -23,7 +23,12 @@ parquet-brotli = ["parquet", "parquet/brotli"]
 parquet-gzip = ["parquet", "parquet/flate2-zlib-rs"]
 parquet-lz4 = ["parquet", "parquet/lz4"]
 parquet-zstd = ["parquet", "parquet/zstd"]
-warc = ["dep:arrow-array", "dep:warc", "dep:arrow-schema", "dep:open-arrow-access-layers"]
+warc = [
+    "dep:arrow-array",
+    "dep:warc",
+    "dep:arrow-schema",
+    "open-arrow-access-layers/source-columns",
+]
 xml = ["dep:xml-arrow"]
 
 [dependencies]
@@ -55,7 +60,11 @@ open-arrow-access-dataset = { path = "../dataset" }
 open-arrow-access-decompression = { path = "../decompression", default-features = false, features = [
     "gzip",
 ] }
-open-arrow-access-layers = { workspace = true, features = ["source-positions"] }
+open-arrow-access-layers = { workspace = true, features = [
+    "source-positions",
+    "parallel-read",
+    "unordered-emission",
+] }
 open-arrow-access-storage.workspace = true
 open-arrow-access-test-support.workspace = true
 rstest.workspace = true

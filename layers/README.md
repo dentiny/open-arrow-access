@@ -4,8 +4,49 @@ Stream layers wrap an accessor with `AccessorExt::layer`. They preserve its Rust
 request and reader interfaces; record layers may change Arrow schema and values.
 `AttachmentFallbackLayer` instead wraps cell accessors with `wrap` and returns a
 single typed attachment cell before any Arrow batch assembly.
-All layers in this crate are always available through `open_arrow_access::layers`.
+Built-in layers are available through `open_arrow_access::layers` when their
+Cargo features are enabled. Both crates default to no built-in layers.
 Byte decompression layers use the same contract but require [codec features](../decompression/README.md).
+
+## Features
+
+| Layer / adapter | Facade feature | `open-arrow-access-layers` feature |
+| --- | --- | --- |
+| `AttachmentFallbackLayer` | `layer-attachment-fallback` | `attachment-fallback` |
+| `CoalesceBatchesLayer` | `layer-coalesce-batches` | `coalesce-batches` |
+| `FilterLayer` | `layer-filter` | `filter` |
+| `LimitLayer` | `layer-limit` | `limit` |
+| `MetricsLayer` re-export | `layer-metrics` | `metrics` |
+| `MissingObjectLayer` | `layer-missing-object` | `missing-object` |
+| `ParallelReadLayer` | `layer-parallel-read` | `parallel-read` |
+| `PrefetchLayer` | `layer-prefetch` | `prefetch` |
+| `SamplingLayer` | `layer-sampling` | `sampling` |
+| `SchemaEvolutionLayer` | `layer-schema-evolution` | `schema-evolution` |
+| `SourceColumns` | `layer-source-columns` | `source-columns` |
+| `SourcePositionLayer` | `layer-source-positions` (or `source-positions`) | `source-positions` |
+| `UnorderedEmissionLayer` | `layer-unordered-emission` | `unordered-emission` |
+| All of the above | `layers-all` | `all` |
+
+`unordered-emission` and `missing-object` also enable `parallel-read` because
+they use the shared partition executor. `source-positions` also enables `source-columns` and frame codecs.
+Only `filter` and `schema-evolution` enable DataFusion; the latter also enables
+SQL. Arrow cast/select kernels, Tokio, and compression dependencies are optional
+and enabled by the layers that use them. The core `Layer` trait and
+`core::metrics` API remain available independently of the built-in layer exports.
+
+```toml
+open-arrow-access = { version = "0.21.8", default-features = false, features = [
+    "format-parquet",
+    "layer-limit",
+    "layer-sampling",
+] }
+```
+
+For direct use of this crate, select the unprefixed features on
+`open-arrow-access-layers`. During migration, `layers-all` / `all` restores the
+complete set of layer APIs. Enabling features only compiles APIs; construct the
+layers to apply their behavior. Cargo combines features across dependencies, so
+another consumer of schema evolution or filtering can still enable DataFusion.
 
 ## Choose a layer
 
@@ -40,7 +81,8 @@ flowchart LR
 `source.layer(a).layer(b)` makes `b` outermost: opening goes through `b`, then
 `a`, then the source. Batches flow back through `a` and then `b`.
 
-Enable `format-json` for this complete composition function:
+Enable `format-json`, `layer-parallel-read`, `layer-schema-evolution`,
+`layer-sampling`, and `layer-limit` for this complete composition function:
 
 ```rust,no_run
 use open_arrow_access::{

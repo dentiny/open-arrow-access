@@ -1,10 +1,18 @@
+#[cfg(any(
+    feature = "filter",
+    feature = "schema-evolution",
+    feature = "coalesce-batches",
+    feature = "source-columns"
+))]
 use arrow_schema::ArrowError;
 use open_arrow_access_core::{Error, ErrorKind};
 
+#[cfg(feature = "filter")]
 pub(crate) fn filter_plan_error(error: datafusion::error::DataFusionError) -> Error {
     Error::new(ErrorKind::InvalidInput, "plan_filter", error.to_string()).with_source(error)
 }
 
+#[cfg(feature = "filter")]
 pub(crate) fn unsupported_cell_filter_type(field: &arrow_schema::Field) -> Error {
     filter_plan_error(datafusion::error::DataFusionError::Plan(format!(
         "cell filter target {:?} has unsupported type {}",
@@ -13,16 +21,19 @@ pub(crate) fn unsupported_cell_filter_type(field: &arrow_schema::Field) -> Error
     )))
 }
 
+#[cfg(feature = "filter")]
 pub(crate) fn filter_predicate_type(actual: &arrow_schema::DataType) -> ArrowError {
     ArrowError::ComputeError(format!(
         "filter predicate must return Boolean, got {actual}"
     ))
 }
 
+#[cfg(feature = "filter")]
 pub(crate) fn filter_error(error: impl std::error::Error + Send + Sync + 'static) -> Error {
     Error::new(ErrorKind::Decode, "filter", error.to_string()).with_source(error)
 }
 
+#[cfg(feature = "filter")]
 pub(crate) fn filter_schema_mismatch() -> Error {
     Error::new(
         ErrorKind::Decode,
@@ -31,10 +42,12 @@ pub(crate) fn filter_schema_mismatch() -> Error {
     )
 }
 
+#[cfg(feature = "coalesce-batches")]
 pub(crate) fn coalesce_error(error: ArrowError) -> Error {
     Error::new(ErrorKind::Decode, "coalesce_batches", error.to_string()).with_source(error)
 }
 
+#[cfg(feature = "schema-evolution")]
 fn column_error(
     kind: ErrorKind,
     operation: &'static str,
@@ -44,6 +57,7 @@ fn column_error(
     Error::new(kind, operation, format!("column {column:?}: {error}")).with_source(error)
 }
 
+#[cfg(feature = "schema-evolution")]
 pub(crate) fn evolution_config_error(column: &str, error: ArrowError) -> Error {
     column_error(
         ErrorKind::InvalidInput,
@@ -53,6 +67,7 @@ pub(crate) fn evolution_config_error(column: &str, error: ArrowError) -> Error {
     )
 }
 
+#[cfg(feature = "parallel-read")]
 pub(crate) fn schema_error() -> Error {
     Error::new(
         ErrorKind::Decode,
@@ -61,6 +76,7 @@ pub(crate) fn schema_error() -> Error {
     )
 }
 
+#[cfg(feature = "parallel-read")]
 pub(crate) fn partition_task_error(error: tokio::task::JoinError) -> Error {
     Error::new(
         ErrorKind::Decode,
@@ -69,6 +85,7 @@ pub(crate) fn partition_task_error(error: tokio::task::JoinError) -> Error {
     )
 }
 
+#[cfg(feature = "sampling")]
 pub(crate) fn invalid_probability() -> Error {
     Error::new(
         ErrorKind::InvalidInput,
@@ -77,6 +94,7 @@ pub(crate) fn invalid_probability() -> Error {
     )
 }
 
+#[cfg(feature = "parallel-read")]
 pub(crate) fn invalid_emission() -> Error {
     Error::new(
         ErrorKind::InvalidInput,
@@ -85,6 +103,7 @@ pub(crate) fn invalid_emission() -> Error {
     )
 }
 
+#[cfg(feature = "parallel-read")]
 pub(crate) fn conflicting_parallel_settings() -> Error {
     Error::new(
         ErrorKind::InvalidInput,
@@ -93,6 +112,7 @@ pub(crate) fn conflicting_parallel_settings() -> Error {
     )
 }
 
+#[cfg(feature = "schema-evolution")]
 pub(crate) fn extension_cast(field: &arrow_schema::Field) -> Error {
     Error::new(
         ErrorKind::Unsupported,
@@ -104,6 +124,7 @@ pub(crate) fn extension_cast(field: &arrow_schema::Field) -> Error {
     )
 }
 
+#[cfg(feature = "schema-evolution")]
 pub(crate) fn unsupported_cast(
     field: &arrow_schema::Field,
     from: &arrow_schema::DataType,
@@ -117,6 +138,7 @@ pub(crate) fn unsupported_cast(
     )
 }
 
+#[cfg(any(feature = "filter", feature = "schema-evolution"))]
 pub(crate) fn cannot_cast(
     from: &arrow_schema::DataType,
     target: &arrow_schema::DataType,
@@ -124,10 +146,12 @@ pub(crate) fn cannot_cast(
     ArrowError::CastError(format!("cannot cast {from} to {target}"))
 }
 
+#[cfg(feature = "sampling")]
 pub(crate) fn sample_error(error: impl std::error::Error + Send + Sync + 'static) -> Error {
     Error::new(ErrorKind::Decode, "sample", error.to_string()).with_source(error)
 }
 
+#[cfg(feature = "schema-evolution")]
 pub(crate) fn cast_error(
     name: &str,
     from: &arrow_schema::DataType,
@@ -142,18 +166,22 @@ pub(crate) fn cast_error(
     .with_source(error)
 }
 
+#[cfg(feature = "schema-evolution")]
 pub(crate) fn invalid_evolution_type(data_type: &arrow_schema::DataType) -> ArrowError {
     ArrowError::InvalidArgumentError(format!("invalid or unsupported column type {data_type}"))
 }
 
+#[cfg(any(feature = "filter", feature = "schema-evolution"))]
 pub(crate) fn volatile_expression() -> datafusion::error::DataFusionError {
     datafusion::common::plan_datafusion_err!("volatile functions are not supported")
 }
 
+#[cfg(any(feature = "filter", feature = "schema-evolution"))]
 pub(crate) fn non_row_expression() -> datafusion::error::DataFusionError {
     datafusion::common::plan_datafusion_err!("only row-level expressions are supported")
 }
 
+#[cfg(feature = "schema-evolution")]
 pub(crate) fn invalid_evolution(message: &str) -> Error {
     Error::new(
         ErrorKind::InvalidInput,
@@ -162,34 +190,40 @@ pub(crate) fn invalid_evolution(message: &str) -> Error {
     )
 }
 
+#[cfg(feature = "schema-evolution")]
 pub(crate) fn nested_path_too_short() -> Error {
     invalid_evolution("nested field path requires a column and at least one child")
 }
 
+#[cfg(feature = "schema-evolution")]
 pub(crate) fn nested_extension_field(name: &str) -> Error {
     invalid_evolution(&format!(
         "cannot remove fields inside extension type {name:?}"
     ))
 }
 
+#[cfg(feature = "schema-evolution")]
 pub(crate) fn nested_non_struct(name: &str) -> Error {
     invalid_evolution(&format!(
         "nested field path only traverses structs, got {name:?}"
     ))
 }
 
+#[cfg(feature = "schema-evolution")]
 pub(crate) fn nested_field_not_unique(name: &str) -> Error {
     invalid_evolution(&format!(
         "nested field {name:?} must resolve to exactly one field"
     ))
 }
 
+#[cfg(feature = "schema-evolution")]
 pub(crate) fn nullable_nested_extraction(name: &str) -> Error {
     invalid_evolution(&format!(
         "cannot extract union or run-end encoded field {name:?} through nullable structs"
     ))
 }
 
+#[cfg(feature = "schema-evolution")]
 pub(crate) fn evolution_source(name: &str) -> Error {
     let error = ArrowError::SchemaError(format!("unknown field {name:?}"));
     Error::new(
@@ -199,6 +233,7 @@ pub(crate) fn evolution_source(name: &str) -> Error {
     )
     .with_source(error)
 }
+#[cfg(feature = "schema-evolution")]
 pub(crate) fn evolution_output_collision() -> Error {
     Error::new(
         ErrorKind::InvalidInput,
@@ -206,6 +241,7 @@ pub(crate) fn evolution_output_collision() -> Error {
         "evolved column names collide",
     )
 }
+#[cfg(feature = "schema-evolution")]
 pub(crate) fn evolution_schema_mismatch() -> Error {
     Error::new(
         ErrorKind::Decode,
@@ -213,6 +249,7 @@ pub(crate) fn evolution_schema_mismatch() -> Error {
         "source batch schema differs from the opened schema",
     )
 }
+#[cfg(feature = "schema-evolution")]
 pub(crate) fn invalid_added_column(name: &str, message: impl std::fmt::Display) -> Error {
     Error::new(
         ErrorKind::Decode,
@@ -220,6 +257,7 @@ pub(crate) fn invalid_added_column(name: &str, message: impl std::fmt::Display) 
         format!("added column {name:?}: {message}"),
     )
 }
+#[cfg(feature = "schema-evolution")]
 pub(crate) fn evolution_plan_error(
     name: &str,
     source: datafusion::error::DataFusionError,
@@ -231,12 +269,14 @@ pub(crate) fn evolution_plan_error(
         source,
     )
 }
+#[cfg(feature = "schema-evolution")]
 pub(crate) fn evolution_expression_error(
     name: &str,
     source: datafusion::error::DataFusionError,
 ) -> Error {
     invalid_added_column(name, &source).with_source(source)
 }
+#[cfg(feature = "schema-evolution")]
 pub(crate) fn evolution_expression_type(
     name: &str,
     expected: &arrow_schema::DataType,
@@ -248,10 +288,12 @@ pub(crate) fn evolution_expression_type(
         format!("column {name:?}: expected type {expected}, expression returns {actual}"),
     )
 }
+#[cfg(feature = "schema-evolution")]
 pub(crate) fn evolution_batch(source: ArrowError) -> Error {
     Error::new(ErrorKind::Decode, "evolve_schema", source.to_string()).with_source(source)
 }
 
+#[cfg(feature = "source-columns")]
 pub(crate) fn source_column_name_conflict(name: &str) -> Error {
     Error::new(
         ErrorKind::InvalidInput,
@@ -259,6 +301,7 @@ pub(crate) fn source_column_name_conflict(name: &str) -> Error {
         format!("conflicting output field {name:?}"),
     )
 }
+#[cfg(feature = "source-columns")]
 pub(crate) fn source_positions_required() -> Error {
     Error::new(
         ErrorKind::Unsupported,
@@ -266,6 +309,7 @@ pub(crate) fn source_positions_required() -> Error {
         "source offsets require a positioned record reader",
     )
 }
+#[cfg(feature = "source-columns")]
 pub(crate) fn source_object_required() -> Error {
     Error::new(
         ErrorKind::Unsupported,
@@ -273,6 +317,7 @@ pub(crate) fn source_object_required() -> Error {
         "source object locator is unavailable",
     )
 }
+#[cfg(feature = "source-columns")]
 pub(crate) fn source_schema_mismatch() -> Error {
     Error::new(
         ErrorKind::Decode,
@@ -280,6 +325,7 @@ pub(crate) fn source_schema_mismatch() -> Error {
         "source batch schema differs from the opened schema",
     )
 }
+#[cfg(feature = "source-columns")]
 pub(crate) fn source_column_batch_error(error: ArrowError) -> Error {
     Error::new(ErrorKind::Decode, "source_columns", error.to_string()).with_source(error)
 }
@@ -310,6 +356,7 @@ pub(crate) fn source_frame_decode_error(error: std::io::Error) -> Error {
     .with_source(error)
 }
 
+#[cfg(feature = "prefetch")]
 pub(crate) fn prefetch_runtime_error(error: tokio::runtime::TryCurrentError) -> Error {
     Error::new(
         ErrorKind::InvalidInput,
@@ -319,6 +366,7 @@ pub(crate) fn prefetch_runtime_error(error: tokio::runtime::TryCurrentError) -> 
     .with_source(error)
 }
 
+#[cfg(feature = "prefetch")]
 pub(crate) fn prefetch_task_error(error: tokio::task::JoinError) -> Error {
     Error::new(
         ErrorKind::Internal,

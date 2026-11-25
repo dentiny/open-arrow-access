@@ -1,8 +1,11 @@
 # Integrated crawls
 
 `open_arrow_access::crawl` supplies one execution entry point for existing service
-and dataset planners and a discovery-only interface for new services. It is always
-available; enable the formats, services and codecs your source uses.
+and dataset planners and a discovery-only interface for new services. Enable
+`crawl`, plus the formats, services and codecs your source uses. `crawl` enables
+parallel reading, unordered emission, coalescing and prefetch, without DataFusion.
+Add `layer-schema-evolution` to expose `CrawlOptions::evolution` and
+`with_evolution` and run transformations inside partition workers.
 
 For a quick path, see [existing sources and configuration](#existing-sources-and-layer-configuration).
 For implementation details, follow the [overall lifecycle](#overall-lifecycle),

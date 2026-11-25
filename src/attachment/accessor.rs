@@ -20,7 +20,7 @@ use std::{marker::PhantomData, sync::Arc};
 /// extra schema open; binary objects remain indivisible documents.
 ///
 /// Generic attachments retain `PreserveGlobal` ordering. Use ordered emission
-/// when composing this accessor with [`crate::crawl::CrawlAccessor`].
+/// when composing this accessor with `crate::crawl::CrawlAccessor` (feature `crawl`).
 ///
 /// Use [`crate::open_attachment_source`] to bind one request immediately, or pass this
 /// adapter to [`crate::BoundSource::bind`] or [`crate::PreparedSource::prepare`]

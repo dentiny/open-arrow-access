@@ -120,3 +120,20 @@ cargo test -p open-arrow-access-storage --locked
 
 Plain `cargo test` does not select every workspace member or enable optional
 formats. Use the workspace command above for complete coverage.
+
+## Layer feature isolation
+
+Run `make check-layer-features` to compile each layer feature independently on
+both the layers crate and facade, compile all layer test targets, and check the
+normal/build dependency graph. The check rejects DataFusion in the baseline,
+lightweight layers, crawling, and WARC, and rejects the SQL parser for filtering
+alone. Semantic Scholar explicitly opts into schema evolution and is checked for
+that dependency. Dependency checks exclude dev-dependencies so test helpers cannot
+hide a missing feature or create a false dependency regression. For a quick graph
+check without compiling, run `python3 scripts/check-layer-features.py --dependencies-only`.
+
+Run the complete layer behavior suite with:
+
+```sh
+cargo test -p open-arrow-access-layers --all-features --locked
+```

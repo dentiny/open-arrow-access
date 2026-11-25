@@ -57,7 +57,8 @@ and inference samples for execution. Type and metadata conflicts fail without im
 
 ## Generated columns and observation
 
-[`SchemaEvolutionLayer`](../layers/README.md) is implemented and always available.
+[`SchemaEvolutionLayer`](../layers/README.md) is implemented behind the
+`layer-schema-evolution` facade feature (`schema-evolution` on the layers crate).
 It adds DataFusion `Expr` or SQL columns, removes or renames fields, and applies
 explicit Arrow casts through one layer. SQL and inferred `Expr` additions derive
 their output type, nullability and metadata. Supplying a complete

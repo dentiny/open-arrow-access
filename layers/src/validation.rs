@@ -1,14 +1,30 @@
+#[cfg(any(
+    feature = "filter",
+    feature = "schema-evolution",
+    feature = "source-columns"
+))]
 use std::collections::HashSet;
 
+#[cfg(any(feature = "filter", feature = "schema-evolution"))]
 use arrow_array::types::{
     Decimal32Type, Decimal64Type, Decimal128Type, Decimal256Type,
     validate_decimal_precision_and_scale,
 };
-use arrow_schema::{DataType, Field, TimeUnit};
-use open_arrow_access_core::{
-    EmissionPolicy, FieldNameIndex, OrderRequirement, ParallelReadOptions, Result,
-};
+#[cfg(any(
+    feature = "filter",
+    feature = "schema-evolution",
+    feature = "source-columns"
+))]
+use arrow_schema::Field;
+#[cfg(any(feature = "filter", feature = "schema-evolution"))]
+use arrow_schema::{DataType, TimeUnit};
+#[cfg(any(feature = "filter", feature = "schema-evolution"))]
+use open_arrow_access_core::FieldNameIndex;
+use open_arrow_access_core::Result;
+#[cfg(feature = "parallel-read")]
+use open_arrow_access_core::{EmissionPolicy, OrderRequirement, ParallelReadOptions};
 
+#[cfg(feature = "filter")]
 pub(crate) fn validate_cell_filter_target(field: &Field) -> Result<()> {
     // These layouts encode nulls in children rather than a top-level validity
     // bitmap, so nullif cannot mask them.
@@ -21,6 +37,7 @@ pub(crate) fn validate_cell_filter_target(field: &Field) -> Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "sampling")]
 pub(crate) fn validate_sampling_probability(probability: f64) -> Result<()> {
     if !probability.is_finite() || !(0.0..=1.0).contains(&probability) {
         return Err(crate::error::invalid_probability());
@@ -28,6 +45,7 @@ pub(crate) fn validate_sampling_probability(probability: f64) -> Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "parallel-read")]
 pub(crate) fn validate_emission_policy(
     emission: EmissionPolicy,
     ordering: OrderRequirement,
@@ -38,6 +56,7 @@ pub(crate) fn validate_emission_policy(
     Ok(())
 }
 
+#[cfg(feature = "parallel-read")]
 pub(crate) fn validate_parallel_read_settings(
     previous: Option<ParallelReadOptions>,
     settings: ParallelReadOptions,
@@ -56,6 +75,7 @@ pub(crate) fn validate_parallel_read_settings(
     Ok(())
 }
 
+#[cfg(feature = "schema-evolution")]
 pub(crate) fn validate_cast(field: &Field, target: &DataType) -> Result<()> {
     let from = field.data_type();
     if has_extension(field) || has_extension_type(target) {
@@ -67,21 +87,25 @@ pub(crate) fn validate_cast(field: &Field, target: &DataType) -> Result<()> {
     Ok(())
 }
 
+#[cfg(any(feature = "filter", feature = "schema-evolution"))]
 fn can_cast_types(from: &DataType, to: &DataType) -> bool {
     arrow_cast::can_cast_types(from, to)
         && is_valid_cast_target(from, to)
         && is_safe_decimal_cast(from, to)
 }
 
+#[cfg(any(feature = "filter", feature = "schema-evolution"))]
 fn is_valid_cast_target(from: &DataType, to: &DataType) -> bool {
     from == to || is_valid_evolution_type(to, true)
 }
 
+#[cfg(any(feature = "filter", feature = "schema-evolution"))]
 struct DecimalParams {
     precision: i16,
     scale: i16,
 }
 
+#[cfg(any(feature = "filter", feature = "schema-evolution"))]
 fn decimal_params(data_type: &DataType) -> Option<DecimalParams> {
     match data_type {
         DataType::Decimal32(precision, scale)
@@ -95,6 +119,7 @@ fn decimal_params(data_type: &DataType) -> Option<DecimalParams> {
     }
 }
 
+#[cfg(any(feature = "filter", feature = "schema-evolution"))]
 fn list_item(data_type: &DataType) -> Option<&DataType> {
     match data_type {
         DataType::List(field)
@@ -106,6 +131,7 @@ fn list_item(data_type: &DataType) -> Option<&DataType> {
     }
 }
 
+#[cfg(any(feature = "filter", feature = "schema-evolution"))]
 fn is_safe_decimal_cast(from: &DataType, to: &DataType) -> bool {
     if from == to || from.is_null() {
         return true;
@@ -174,6 +200,7 @@ fn is_safe_decimal_cast(from: &DataType, to: &DataType) -> bool {
     }
 }
 
+#[cfg(feature = "schema-evolution")]
 pub(crate) fn validate_evolution_type(
     data_type: &DataType,
     for_cast: bool,
@@ -185,6 +212,7 @@ pub(crate) fn validate_evolution_type(
     }
 }
 
+#[cfg(any(feature = "filter", feature = "schema-evolution"))]
 fn is_valid_evolution_type(data_type: &DataType, for_cast: bool) -> bool {
     match data_type {
         DataType::Time32(unit) => matches!(unit, TimeUnit::Second | TimeUnit::Millisecond),
@@ -245,10 +273,12 @@ fn is_valid_evolution_type(data_type: &DataType, for_cast: bool) -> bool {
     }
 }
 
+#[cfg(feature = "schema-evolution")]
 fn has_extension(field: &Field) -> bool {
     field.metadata().contains_key("ARROW:extension:name") || has_extension_type(field.data_type())
 }
 
+#[cfg(feature = "schema-evolution")]
 fn has_extension_type(data_type: &DataType) -> bool {
     match data_type {
         DataType::List(field)
@@ -265,6 +295,7 @@ fn has_extension_type(data_type: &DataType) -> bool {
     }
 }
 
+#[cfg(any(feature = "filter", feature = "schema-evolution"))]
 pub(crate) fn validate_expression(
     expression: &datafusion::logical_expr::Expr,
 ) -> datafusion::error::Result<()> {
@@ -295,6 +326,7 @@ pub(crate) fn validate_expression(
     Ok(())
 }
 
+#[cfg(any(feature = "filter", feature = "schema-evolution"))]
 pub(crate) fn validate_expression_casts(
     expression: &datafusion::logical_expr::Expr,
     schema: &datafusion::common::DFSchema,
@@ -336,6 +368,7 @@ pub(crate) fn validate_expression_casts(
     Ok(())
 }
 
+#[cfg(feature = "parallel-read")]
 pub(crate) fn validate_partition_schema(
     actual: &arrow_schema::SchemaRef,
     expected: &arrow_schema::SchemaRef,
@@ -343,6 +376,7 @@ pub(crate) fn validate_partition_schema(
     open_arrow_access_core::validate_schema(actual, expected, crate::error::schema_error)
 }
 
+#[cfg(feature = "schema-evolution")]
 pub(crate) fn validate_evolution_specs(changes: &[crate::ColumnEvolution]) -> Result<()> {
     use crate::ColumnEvolution;
     for change in changes {
@@ -394,6 +428,7 @@ pub(crate) fn validate_evolution_specs(changes: &[crate::ColumnEvolution]) -> Re
     Ok(())
 }
 
+#[cfg(feature = "schema-evolution")]
 fn validate_nested_path(path: &[String]) -> Result<()> {
     if path.len() < 2 {
         return Err(crate::error::nested_path_too_short());
@@ -404,6 +439,7 @@ fn validate_nested_path(path: &[String]) -> Result<()> {
 
 /// Validate a literal struct path once at open, returning indices and the
 /// selected field with nullability inherited from every parent.
+#[cfg(feature = "schema-evolution")]
 pub(crate) fn resolve_nested_field(
     root: &arrow_schema::FieldRef,
     path: &[String],
@@ -438,6 +474,7 @@ pub(crate) fn resolve_nested_field(
     ))
 }
 
+#[cfg(feature = "schema-evolution")]
 pub(crate) fn validate_nested_extraction(field: &Field) -> Result<()> {
     // These types have no top-level validity bitmap for a null parent.
     if field.is_nullable()
@@ -451,6 +488,7 @@ pub(crate) fn validate_nested_extraction(field: &Field) -> Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "schema-evolution")]
 fn validate_evolution_name(name: &str) -> Result<()> {
     if name.trim().is_empty() {
         return Err(crate::error::invalid_evolution(
@@ -460,6 +498,7 @@ fn validate_evolution_name(name: &str) -> Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "schema-evolution")]
 pub(crate) fn validate_evolution_source(indexed_names: usize, source_fields: usize) -> Result<()> {
     if indexed_names != source_fields {
         return Err(crate::error::evolution_output_collision());
@@ -467,6 +506,7 @@ pub(crate) fn validate_evolution_source(indexed_names: usize, source_fields: usi
     Ok(())
 }
 
+#[cfg(feature = "schema-evolution")]
 pub(crate) fn validate_evolution_target(
     source: Option<usize>,
     target: Option<usize>,
@@ -478,6 +518,7 @@ pub(crate) fn validate_evolution_target(
 }
 
 // The upstream RecordReader owns the fixed-schema contract for untouched fields.
+#[cfg(feature = "schema-evolution")]
 pub(crate) fn validate_evolution_batch_schema(
     actual: &arrow_schema::SchemaRef,
     expected: &arrow_schema::SchemaRef,
@@ -494,6 +535,7 @@ pub(crate) fn validate_evolution_batch_schema(
     Ok(())
 }
 
+#[cfg(feature = "schema-evolution")]
 pub(crate) fn validate_added_column(
     field: &Field,
     array: &dyn arrow_array::Array,
@@ -522,6 +564,7 @@ pub(crate) fn validate_added_column(
     Ok(())
 }
 
+#[cfg(feature = "schema-evolution")]
 pub(crate) fn validate_evolution_expression_type(
     name: &str,
     actual: &DataType,
@@ -535,6 +578,7 @@ pub(crate) fn validate_evolution_expression_type(
     Ok(())
 }
 
+#[cfg(feature = "schema-evolution")]
 pub(crate) fn validate_evolution_input_schema(
     actual: &arrow_schema::SchemaRef,
     expected: &arrow_schema::SchemaRef,
@@ -546,6 +590,7 @@ pub(crate) fn validate_evolution_input_schema(
     )
 }
 
+#[cfg(feature = "source-columns")]
 pub(crate) fn validate_source_column_names(fields: &[Field]) -> Result<()> {
     let mut names = HashSet::new();
     for field in fields {
@@ -556,6 +601,7 @@ pub(crate) fn validate_source_column_names(fields: &[Field]) -> Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "source-columns")]
 pub(crate) fn validate_source_positions(
     columns: &[(crate::source_columns::SourceColumn, String)],
     has_positions: bool,
@@ -570,12 +616,14 @@ pub(crate) fn validate_source_positions(
     Ok(())
 }
 
+#[cfg(feature = "source-columns")]
 pub(crate) fn validate_source_object(
     object: Option<&open_arrow_access_core::ObjectRef>,
 ) -> Result<&open_arrow_access_core::ObjectRef> {
     object.ok_or_else(crate::error::source_object_required)
 }
 
+#[cfg(feature = "source-columns")]
 pub(crate) fn validate_source_schema(
     actual: &arrow_schema::SchemaRef,
     expected: &arrow_schema::SchemaRef,

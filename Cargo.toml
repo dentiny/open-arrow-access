@@ -76,7 +76,7 @@ more-asserts = "0.3.1"
 open-arrow-access-core = { path = "core", version = "0.21.8" }
 open-arrow-access-decompression = { path = "decompression", version = "0.21.8", default-features = false }
 open-arrow-access-file-format = { path = "file-format", version = "0.21.8", default-features = false }
-open-arrow-access-layers = { path = "layers", version = "0.21.8" }
+open-arrow-access-layers = { path = "layers", version = "0.21.8", default-features = false }
 open-arrow-access-storage = { path = "storage", version = "0.21.8", default-features = false }
 open-arrow-access-test-support = { path = "test-support" }
 opendal = { version = "0.59.5", default-features = false }
@@ -91,6 +91,12 @@ open-arrow-access-service = { path = "service", version = "0.21.8", default-feat
 
 [features]
 blocking = ["dep:arrow-array", "dep:tokio"]
+crawl = [
+    "layer-parallel-read",
+    "layer-unordered-emission",
+    "layer-coalesce-batches",
+    "layer-prefetch",
+]
 decompression-bz2 = ["open-arrow-access-decompression/bz2"]
 decompression-gzip = ["open-arrow-access-decompression/gzip"]
 decompression-lz4 = ["open-arrow-access-decompression/lz4"]
@@ -108,6 +114,34 @@ format-parquet-lz4 = ["format-parquet", "open-arrow-access-file-format/parquet-l
 format-parquet-zstd = ["format-parquet", "open-arrow-access-file-format/parquet-zstd"]
 format-warc = ["open-arrow-access-file-format/warc"]
 format-xml = ["open-arrow-access-file-format/xml", "open-arrow-access-service/format-xml"]
+layer-attachment-fallback = ["open-arrow-access-layers/attachment-fallback"]
+layer-coalesce-batches = ["open-arrow-access-layers/coalesce-batches"]
+layer-filter = ["open-arrow-access-layers/filter"]
+layer-limit = ["open-arrow-access-layers/limit"]
+layer-metrics = ["open-arrow-access-layers/metrics"]
+layer-missing-object = ["open-arrow-access-layers/missing-object"]
+layer-parallel-read = ["open-arrow-access-layers/parallel-read"]
+layer-prefetch = ["open-arrow-access-layers/prefetch"]
+layer-sampling = ["open-arrow-access-layers/sampling"]
+layer-schema-evolution = ["open-arrow-access-layers/schema-evolution"]
+layer-source-columns = ["open-arrow-access-layers/source-columns"]
+layer-source-positions = ["open-arrow-access-layers/source-positions"]
+layer-unordered-emission = ["open-arrow-access-layers/unordered-emission"]
+layers-all = [
+    "layer-attachment-fallback",
+    "layer-coalesce-batches",
+    "layer-filter",
+    "layer-limit",
+    "layer-metrics",
+    "layer-missing-object",
+    "layer-parallel-read",
+    "layer-prefetch",
+    "layer-sampling",
+    "layer-schema-evolution",
+    "layer-source-columns",
+    "layer-source-positions",
+    "layer-unordered-emission",
+]
 service-arxiv = ["open-arrow-access-service/arxiv"]
 service-bhl = ["open-arrow-access-service/bhl"]
 service-biorxiv = ["open-arrow-access-service/biorxiv"]
@@ -131,7 +165,7 @@ service-semantic-scholar = ["open-arrow-access-service/semantic-scholar"]
 service-uspto = ["open-arrow-access-service/uspto"]
 service-warc = ["open-arrow-access-service/warc"]
 service-zenodo = ["open-arrow-access-service/zenodo"]
-source-positions = ["open-arrow-access-layers/source-positions"]
+source-positions = ["layer-source-positions"]
 
 [dependencies]
 arrow-array = { workspace = true, optional = true }
@@ -162,12 +196,20 @@ workspace = true
 
 [[test]]
 name = "arxiv_xml"
-required-features = ["format-xml"]
+required-features = ["format-xml", "crawl"]
 
 [[test]]
 name = "arxiv_documents"
-required-features = ["service-arxiv"]
+required-features = ["service-arxiv", "crawl"]
 
 [[test]]
 name = "bhl_shards"
-required-features = ["service-bhl"]
+required-features = ["service-bhl", "crawl"]
+
+[[test]]
+name = "archive"
+required-features = ["crawl"]
+
+[[test]]
+name = "archive_parallel"
+required-features = ["crawl"]

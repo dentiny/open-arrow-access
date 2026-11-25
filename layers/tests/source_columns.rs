@@ -8,7 +8,9 @@ use open_arrow_access_core::{
     ReadOptions, ReadRequest, RecordBatch, RecordCapability, RecordMetadata, Result, StreamReader,
     async_trait,
 };
-use open_arrow_access_layers::{ColumnEvolution, SchemaEvolutionLayer, SourceColumns};
+use open_arrow_access_layers::SourceColumns;
+#[cfg(feature = "schema-evolution")]
+use open_arrow_access_layers::{ColumnEvolution, SchemaEvolutionLayer};
 
 // Coordinates may come from an external index. This accessor has no byte input,
 // WARC parser, or factory; the adapter only needs decoded batches with positions.
@@ -131,6 +133,7 @@ async fn later_batch_schema_drift_is_terminal() {
     assert!(reader.next().await.unwrap().is_none());
 }
 
+#[cfg(feature = "schema-evolution")]
 #[tokio::test]
 async fn row_preserving_evolution_retains_coordinates_across_casts_and_generated_columns() {
     let input = IndexedSource {

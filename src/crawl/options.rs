@@ -2,8 +2,11 @@ use std::num::NonZeroUsize;
 
 use crate::{
     EmissionPolicy,
-    layers::{CoalesceBatchesLayer, ParallelReadLayer, PrefetchLayer, SchemaEvolutionLayer},
+    layers::{CoalesceBatchesLayer, ParallelReadLayer, PrefetchLayer},
 };
+
+#[cfg(feature = "layer-schema-evolution")]
+use crate::layers::SchemaEvolutionLayer;
 
 /// Scan-wide execution settings. Layer configurations retain their complete public APIs.
 /// Byte I/O, HTTP limits, retries and codecs belong to the supplied source/client.
@@ -20,6 +23,7 @@ pub struct CrawlOptions {
     pub emission: EmissionPolicy,
     /// Optional row-local transforms; the default leaves schema and values unchanged.
     /// Configured transforms execute in partition workers, before queue admission.
+    #[cfg(feature = "layer-schema-evolution")]
     pub evolution: SchemaEvolutionLayer,
     /// Optional scan-wide coalescing after merging; useful for document sources.
     pub coalesce: Option<CoalesceBatchesLayer>,
@@ -35,6 +39,7 @@ impl Default for CrawlOptions {
                 NonZeroUsize::new(2).unwrap(),
             ),
             emission: EmissionPolicy::Unordered,
+            #[cfg(feature = "layer-schema-evolution")]
             evolution: SchemaEvolutionLayer::default(),
             coalesce: None,
             prefetch: None,
@@ -56,6 +61,7 @@ impl CrawlOptions {
     }
 
     /// Configure row-local schema and value transformations.
+    #[cfg(feature = "layer-schema-evolution")]
     pub fn with_evolution(mut self, evolution: SchemaEvolutionLayer) -> Self {
         self.evolution = evolution;
         self

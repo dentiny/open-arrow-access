@@ -210,7 +210,10 @@ Enabling a feature compiles an API; construct the accessor/layer to use it.
 | Integrated TAR/single-file expansion into binary member rows | Always available, including TAR and gzip |
 | Directory or explicit file-set reads | Always available; enable the selected `format-*` reader |
 | A provider | `service-<name>`; see the [complete service table](service/README.md#choose-a-service) |
-| Core contracts, storage, shared service HTTP utilities, record layers | Always available; no extra facade feature |
+| Core contracts, storage, shared service HTTP utilities | Always available; no extra facade feature |
+| Built-in record layers | Individual `layer-*` features; see [layer features](layers/README.md#features) |
+| All built-in layers | `layers-all` |
+| Integrated crawls | `crawl`; add `layer-schema-evolution` for computed columns |
 | Fs, S3, or another storage backend | Enable `services-fs`, `services-s3`, etc. on your **OpenDAL** dependency |
 
 `ArchiveAccessor::new(bytes, ArchiveOptions::new(ArchiveFormat::Tar))` combines
@@ -225,12 +228,19 @@ uses object suffixes; format selection is explicit. Read through EOF to finish
 decoder integrity checks. The [Rust API documentation](src/archive/accessor.rs)
 describes projection, batching, error timing and composition with `CrawlAccessor`.
 
-Always-available layers include schema evolution with SQL/Expr computed columns, sampling, row limits,
-parallel reads, and unordered emission. See the
-[schema evolution](examples/schema_evolution.rs),
-[SQL generated columns](examples/generated_columns.rs), and
-[parallel sampling](examples/parallel_sampling.rs) examples for runnable layer usage. The baseline includes service
-HTTP/JSON utilities and DataFusion-backed generated columns, even with defaults disabled.
+Built-in layers are opt-in, with empty default feature sets in both the facade
+and `open-arrow-access-layers`. For example, enable `layer-limit` and
+`layer-sampling` to select rows without pulling in DataFusion. Only
+`layer-schema-evolution` and `layer-filter` need DataFusion; schema evolution also
+enables its SQL parser. `service-semantic-scholar` uses schema evolution internally
+and therefore enables that dependency too. Features enabled by any dependency are
+combined by Cargo. See the [layer feature table](layers/README.md#features).
+
+When upgrading, add the features for the built-in layers you already use, or
+`layers-all` for the complete set. Add `crawl` for `CrawlAccessor` and
+`layer-schema-evolution` when using `CrawlOptions::with_evolution` or its `evolution`
+field. The shared `Layer` trait and custom layers remain available without these
+features.
 
 Facade and component-crate feature names differ: `format-json` becomes `json` on
 `open-arrow-access-file-format`, `decompression-gzip` becomes `gzip` on
