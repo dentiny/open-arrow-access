@@ -15,35 +15,62 @@ const MAX_FETCH_BATCH_SIZE: u64 = 2 * 1024 * 1024;
 // can each retain a receive allocation much larger than their payload.
 const MAX_FETCH_RANGES: usize = 512;
 
+/// A fetched byte interval whose bounds match its payload.
+/// Keep the fields private so cache slicing and prefix reuse share this invariant.
+pub(super) struct PrefetchedRange {
+    range: Range<u64>,
+    bytes: Bytes,
+}
+
+impl PrefetchedRange {
+    pub(super) fn new(range: Range<u64>, bytes: Bytes, content_length: u64) -> Result<Self> {
+        validate_byte_range(&range, content_length, "prefetch")?;
+        crate::validation::validate_read_length(
+            bytes.len() as u64,
+            range.end - range.start,
+            "prefetch",
+        )?;
+        Ok(Self { range, bytes })
+    }
+
+    pub(super) fn sequential_prefix(&self) -> Option<opendal::Buffer> {
+        (self.range.start == 0).then(|| opendal::Buffer::from(self.bytes.clone()))
+    }
+
+    fn slice(&self, range: &Range<u64>) -> Option<Bytes> {
+        if range.start >= self.range.start && range.end <= self.range.end {
+            return Some(self.bytes.slice(
+                (range.start - self.range.start) as usize..(range.end - self.range.start) as usize,
+            ));
+        }
+        None
+    }
+}
+
 /// A reader with independently positioned exact-range operations.
 /// Its sequential cursor uses a bounded stream; range reads never touch it.
 pub(super) struct RangedReader {
     inner: opendal::Reader,
     sequential: SequentialReader,
-    cached: Option<(Range<u64>, Bytes)>,
+    prefetched: Option<PrefetchedRange>,
 }
 
 impl RangedReader {
-    pub(super) fn new(
-        inner: opendal::Reader,
-        sequential: SequentialReader,
-        cached: Option<(Range<u64>, Bytes)>,
-    ) -> Self {
+    pub(super) fn new(inner: opendal::Reader, sequential: SequentialReader) -> Self {
         Self {
             inner,
             sequential,
-            cached,
+            prefetched: None,
         }
     }
 
+    pub(super) fn with_prefetched(mut self, prefetched: PrefetchedRange) -> Self {
+        self.prefetched = Some(prefetched);
+        self
+    }
+
     fn cached_range(&self, range: &Range<u64>) -> Option<Bytes> {
-        let (cached, bytes) = self.cached.as_ref()?;
-        if range.start >= cached.start && range.end <= cached.end {
-            return Some(bytes.slice(
-                (range.start - cached.start) as usize..(range.end - cached.start) as usize,
-            ));
-        }
-        None
+        self.prefetched.as_ref()?.slice(range)
     }
 
     async fn read_exact_range(&mut self, range: Range<u64>) -> Result<Bytes> {

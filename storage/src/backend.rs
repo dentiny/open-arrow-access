@@ -8,18 +8,39 @@ use std::{collections::HashMap, num::NonZeroUsize, sync::Arc};
 use crate::error::map_error;
 use futures::TryStreamExt;
 use open_arrow_access_core::{
-    Accessor, ByteAccessor, ByteReadRequest, ByteReader, Bytes, Capability, ListRequest, ObjectRef,
-    ObjectStream, Result, async_trait,
+    Accessor, ByteAccessor, ByteReadOptions, ByteReadRequest, ByteReader, Bytes, Capability,
+    ListRequest, ObjectRef, ObjectStream, Result, async_trait,
 };
 use opendal::{
     Execute, Executor, OperationContext, Operator,
     raw::{BoxedStaticFuture, Layer, Servicer},
 };
-use reader::{RangedReader, SequentialReader};
+use reader::{PrefetchedRange, RangedReader, SequentialReader};
 use tokio::sync::Semaphore;
 
 const DEFAULT_OUTPUT_CHUNK_SIZE: NonZeroUsize = NonZeroUsize::new(64 * 1024).unwrap();
 const DEFAULT_IO_CHUNK_SIZE: usize = 2 * 1024 * 1024;
+
+/// Resolved object metadata and any bytes already fetched while discovering it.
+/// The original request's length hint is no longer needed at this stage.
+struct ReadContent {
+    length: u64,
+    prefetched: Option<PrefetchedRange>,
+}
+
+impl ReadContent {
+    fn new(length: u64) -> Self {
+        Self {
+            length,
+            prefetched: None,
+        }
+    }
+
+    fn with_prefetched(mut self, range: std::ops::Range<u64>, bytes: Bytes) -> Result<Self> {
+        self.prefetched = Some(PrefetchedRange::new(range, bytes, self.length)?);
+        Ok(self)
+    }
+}
 
 /// Generic OpenDAL byte adapter, shared by storage and provider services.
 #[derive(Clone, Debug)]
@@ -96,10 +117,10 @@ impl OpenDalAccessor {
     /// enabled would itself stat before issuing the GET.
     async fn prefetch_suffix(
         &self,
-        request: &ByteReadRequest,
+        object: &ObjectRef,
         size: NonZeroUsize,
-    ) -> Result<Option<(u64, Bytes)>> {
-        let path = request.object.locator();
+    ) -> Result<Option<ReadContent>> {
+        let path = object.locator();
         if !self.operator.info().capability().read_with_suffix {
             return Ok(None);
         }
@@ -142,38 +163,55 @@ impl OpenDalAccessor {
             }
         }
         crate::validation::validate_read_length(bytes.len() as u64, expected, "open")?;
-        Ok(Some((len, Bytes::from(bytes))))
+        let range = len - bytes.len() as u64..len;
+        Ok(Some(
+            ReadContent::new(len).with_prefetched(range, Bytes::from(bytes))?,
+        ))
     }
 
-    async fn open_chunked_http(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
+    async fn open_chunked(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
         let path = request.object.locator();
         let size = request
             .options
             .io_chunk_size
             .map_or(DEFAULT_IO_CHUNK_SIZE, |size| size.get());
-        let operator = self.operator().layer(prefix::PrefixLayer(size));
-        let reader = operator
-            .reader(path)
-            .await
-            .map_err(|e| map_error("open", path, e))?;
-        let mut stream = reader
-            .into_stream(..)
-            .await
-            .map_err(|e| map_error("open", path, e))?;
-        let metadata = stream
-            .metadata()
-            .await
-            .map_err(|e| map_error("open", path, e))?;
+        let operator = self
+            .operator()
+            .layer(prefix::HttpPrefixValidationLayer(size));
+        let (response, mut stream) = match prefix::open(&operator, path, size).await {
+            Ok(response) => response,
+            // Some backends require the requested range to fit the object
+            // exactly. Discover its length before retrying a smaller range.
+            Err(error) if error.kind() == opendal::ErrorKind::RangeNotSatisfied => {
+                return self.open(request).await;
+            }
+            Err(error) => return Err(map_error("open", path, error)),
+        };
+        let Some(metadata) = response.metadata() else {
+            // Not every backend returns whole-object metadata while opening a
+            // range. Release the stream before the known-length fallback.
+            drop(stream);
+            return self.open(request).await;
+        };
         crate::validation::validate_regular_file(metadata.is_file())?;
         let len = metadata.content_length();
         let expected = len.min(size as u64);
         let mut buffers = Vec::new();
         let mut received = 0;
-        while let Some(buffer) = stream
-            .try_next()
-            .await
-            .map_err(|e| map_error("read", path, e))?
-        {
+        loop {
+            // A bounded OpenDAL stream enforces the requested size at EOF.
+            // For a whole object shorter than that range, metadata supplies the
+            // actual size. HTTP validation has already drained such a body.
+            if expected < size as u64 && received == expected {
+                break;
+            }
+            let buffer = stream
+                .read_dyn()
+                .await
+                .map_err(|e| map_error("read", path, e))?;
+            if buffer.is_empty() {
+                break;
+            }
             crate::validation::validate_chunk_length(buffer.len() as u64, expected - received)?;
             received += buffer.len() as u64;
             buffers.push(buffer);
@@ -184,19 +222,19 @@ impl OpenDalAccessor {
         drop(stream);
         let prefix: opendal::Buffer = buffers.into_iter().flatten().collect();
         let bytes = prefix.to_bytes();
-        self.open_with_length(request, len, Some((0..received, bytes)))
+        let content = ReadContent::new(len).with_prefetched(0..received, bytes)?;
+        self.open_ranged(request.object, request.options, content)
             .await
     }
 
-    async fn open_with_length(
+    /// Build the chunked reader after metadata discovery and optional prefetch.
+    async fn open_ranged(
         &self,
-        request: ByteReadRequest,
-        len: u64,
-        cached: Option<(std::ops::Range<u64>, Bytes)>,
+        object: ObjectRef,
+        options: ByteReadOptions,
+        content: ReadContent,
     ) -> Result<Box<dyn ByteReader>> {
-        let ByteReadRequest {
-            object, options, ..
-        } = request;
+        let ReadContent { length, prefetched } = content;
         let path = object.locator();
         // Share a budget across OpenDAL's stream/fetch queues so interleaved
         // range reads cannot multiply sequential prefetch concurrency.
@@ -207,7 +245,7 @@ impl OpenDalAccessor {
         // Coalesce adjacent ranges without fetching unrequested gaps.
         let builder = operator
             .reader_with(path)
-            .content_length_hint(len)
+            .content_length_hint(length)
             .concurrent(options.io_concurrency.get())
             .chunk(
                 options
@@ -216,19 +254,22 @@ impl OpenDalAccessor {
             )
             .gap(0);
         let inner = builder.await.map_err(|e| map_error("open", path, e))?;
-        let prefix = cached
+        let prefix = prefetched
             .as_ref()
-            .filter(|(range, _)| range.start == 0)
-            .map(|(_, bytes)| opendal::Buffer::from(bytes.clone()));
+            .and_then(PrefetchedRange::sequential_prefix);
         let start = prefix.as_ref().map_or(0, |buffer| buffer.len() as u64);
         let stream = inner
             .clone()
-            .into_stream(start..len)
+            .into_stream(start..length)
             .await
             .map_err(|error| map_error("read", path, error))?;
         let sequential =
-            SequentialReader::with_prefix(stream, object, len, self.chunk_size, prefix);
-        Ok(Box::new(RangedReader::new(inner, sequential, cached)))
+            SequentialReader::with_prefix(stream, object, length, self.chunk_size, prefix);
+        let mut reader = RangedReader::new(inner, sequential);
+        if let Some(prefetched) = prefetched {
+            reader = reader.with_prefetched(prefetched);
+        }
+        Ok(Box::new(reader))
     }
 }
 
@@ -254,15 +295,14 @@ impl Accessor for OpenDalAccessor {
 
     async fn open_sequential(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
         let path = request.object.locator();
-        if self.operator.info().scheme() == "http"
-            && request.content_length.is_none()
+        if request.content_length.is_none()
             && (request.options.io_chunk_size.is_some() || request.options.io_concurrency.get() > 1)
             && !self
                 .content_lengths
                 .as_ref()
                 .is_some_and(|lengths| lengths.contains_key(path))
         {
-            return self.open_chunked_http(request).await;
+            return self.open_chunked(request).await;
         }
         if request.content_length.is_some()
             || request.options.io_chunk_size.is_some()
@@ -315,18 +355,18 @@ impl Accessor for OpenDalAccessor {
                 .content_lengths
                 .as_ref()
                 .is_some_and(|lengths| lengths.contains_key(request.object.locator()))
-            && let Some((len, bytes)) = self.prefetch_suffix(&request, size).await?
+            && let Some(content) = self.prefetch_suffix(&request.object, size).await?
         {
-            let range = len - bytes.len() as u64..len;
             return self
-                .open_with_length(request, len, Some((range, bytes)))
+                .open_ranged(request.object, request.options, content)
                 .await;
         }
         let len = match request.content_length {
             Some(length) => length,
             None => self.content_length(request.object.locator()).await?,
         };
-        self.open_with_length(request, len, None).await
+        self.open_ranged(request.object, request.options, ReadContent::new(len))
+            .await
     }
 }
 

@@ -69,6 +69,23 @@ async fn sequential_filesystem_reads_fall_back_when_response_metadata_is_unavail
             output.extend_from_slice(&chunk);
         }
         assert_eq!(output, bytes);
+
+        let reader = accessor
+            .open_sequential(
+                ByteReadRequest::new("data.bin").with_options(ByteReadOptions {
+                    io_chunk_size: NonZeroUsize::new(4),
+                    io_concurrency: NonZeroUsize::new(2).unwrap(),
+                }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(reader.metadata().content_length, Some(bytes.len() as u64));
+        assert_eq!(
+            open_arrow_access_core::read_all(reader, "test")
+                .await
+                .unwrap(),
+            bytes
+        );
     }
 }
 
@@ -410,5 +427,30 @@ async fn byte_io_options_preserve_range_order_empty_ranges_and_sequential_cursor
             ErrorKind::InvalidInput
         );
         assert_eq!(reader.read_range(4..8).await.unwrap().as_ref(), b"efgh");
+    }
+}
+
+#[tokio::test]
+async fn chunked_sequential_reads_support_native_backends_with_exact_range_bounds() {
+    for size in [0_usize, 1, 3, 4, 5, 17] {
+        let operator = opendal::Operator::new(opendal::services::Memory::default()).unwrap();
+        let bytes: Vec<_> = (0..size as u8).collect();
+        operator.write("object", bytes.clone()).await.unwrap();
+        let reader = OpenDalAccessor::new(operator)
+            .open_sequential(
+                ByteReadRequest::new("object").with_options(ByteReadOptions {
+                    io_chunk_size: NonZeroUsize::new(4),
+                    io_concurrency: NonZeroUsize::new(2).unwrap(),
+                }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(reader.metadata().content_length, Some(size as u64));
+        assert_eq!(
+            open_arrow_access_core::read_all(reader, "test")
+                .await
+                .unwrap(),
+            bytes
+        );
     }
 }
