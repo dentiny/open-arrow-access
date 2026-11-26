@@ -12,20 +12,19 @@ versions validated here.
 | OpenDAL | `0.59.5` |
 | Lance baseline | `fc8f59e53233a46f0d73604d66254142802389c9` |
 | Iceberg baseline | `b879b9626754501f025516ce0f0e9535fa6fd414` |
-| atif-arrow | `c8bda1773745a690df2d917a4d0ef5dc8b6de81f` (0.6.0) |
-| xml-arrow | `e7b8d6b7528c59b2588f35d44a4e6f3e7713aae8` (0.4.0) |
+| atif-arrow | `0.6.0` |
+| xml-arrow | `0.4.0` |
 | DuckDB | `65e8759fd4e83dad443a6e08d0b20314c76c671d` |
 
 Lance and Iceberg are compatibility references in this workspace's metadata;
-open-arrow-sink consumes them directly. The ATIF, XML and DuckDB Git pins are
-needed because their published releases do not expose Arrow 59 types. DuckDB is pinned to the last Arrow 59 revision backed by stable DuckDB 1.5.5,
-before its 2.0 alpha engine upgrade. Iceberg is pinned immediately before its Arrow
-60 upgrade. Change each Git pin only after validating the full feature set.
+open-arrow-sink consumes them directly. ATIF and XML use published Arrow 59
+releases. DuckDB is pinned to an upstream Arrow 59 binding snapshot backed by
+DuckDB 1.5.5. Iceberg is pinned immediately before its Arrow 60 upgrade. Change
+each Git pin only after validating the full feature set.
 
 Rust 1.98 is the workspace minimum, aligned with the Lance baseline. The checked-in
 toolchain selects Rust 1.98.1.
 
 When updating this baseline, update the workspace requirements, lockfile,
 compatibility metadata and user-facing dependency examples together. Run the
-workspace checks and tests with all features. Replace the ATIF and XML Git pins
-with their corresponding releases once those versions are published.
+workspace checks and tests with all features.

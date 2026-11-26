@@ -46,7 +46,7 @@ arrow-select = "59.2.0"
 async-compression = { version = "0.4.50", default-features = false, features = ["futures-io"] }
 async-trait = "0.1.91"
 async_zip = { version = "0.0.19", default-features = false, features = ["deflate"] }
-atif-arrow = { git = "https://github.com/dentiny/atif-arrow.git", rev = "c8bda1773745a690df2d917a4d0ef5dc8b6de81f" }
+atif-arrow = "0.6.0"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 http = "1"
 indexmap = "2"
@@ -62,7 +62,7 @@ serde_json = { version = "1", features = ["raw_value"] }
 tar = { version = "0.4.46", default-features = false }
 url = "2"
 warc = { package = "warc-rs", version = "0.3.5", default-features = false }
-xml-arrow = { git = "https://github.com/dentiny/xml-arrow-rs.git", rev = "e7b8d6b7528c59b2588f35d44a4e6f3e7713aae8" }
+xml-arrow = "0.4.0"
 
 # Used by schema evolution expressions.
 datafusion = { version = "55.0.0", default-features = false }

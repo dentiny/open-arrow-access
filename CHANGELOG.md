@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Upgrade Arrow/Parquet to 59.2 and DataFusion to 55; pin compatible ATIF, XML and DuckDB Git revisions. Align the Lance/Iceberg compatibility metadata and require Rust 1.98.
+- Upgrade Arrow/Parquet to 59.2 and DataFusion to 55; use the compatible ATIF/XML releases and pin the DuckDB Git revision. Align the Lance/Iceberg compatibility metadata and require Rust 1.98.
 
 ## 0.21.10 - 2026-11-25
 
