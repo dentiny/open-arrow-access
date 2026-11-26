@@ -20,17 +20,39 @@ const MAX_FETCH_RANGES: usize = 512;
 pub(super) struct RangedReader {
     inner: opendal::Reader,
     sequential: SequentialReader,
+    cached: Option<(Range<u64>, Bytes)>,
 }
 
 impl RangedReader {
-    pub(super) fn new(inner: opendal::Reader, sequential: SequentialReader) -> Self {
-        Self { inner, sequential }
+    pub(super) fn new(
+        inner: opendal::Reader,
+        sequential: SequentialReader,
+        cached: Option<(Range<u64>, Bytes)>,
+    ) -> Self {
+        Self {
+            inner,
+            sequential,
+            cached,
+        }
+    }
+
+    fn cached_range(&self, range: &Range<u64>) -> Option<Bytes> {
+        let (cached, bytes) = self.cached.as_ref()?;
+        if range.start >= cached.start && range.end <= cached.end {
+            return Some(bytes.slice(
+                (range.start - cached.start) as usize..(range.end - cached.start) as usize,
+            ));
+        }
+        None
     }
 
     async fn read_exact_range(&mut self, range: Range<u64>) -> Result<Bytes> {
         validate_byte_range(&range, self.sequential.length(), "read_range")?;
         if range.is_empty() {
             return Ok(Bytes::new());
+        }
+        if let Some(bytes) = self.cached_range(&range) {
+            return Ok(bytes);
         }
         let path = self.sequential.path();
         let expected = range.end - range.start;
@@ -122,6 +144,19 @@ impl ByteReader for RangedReader {
         }
         if ranges.iter().all(Range::is_empty) {
             return Ok(vec![Bytes::new(); ranges.len()]);
+        }
+        if let Some(cached) = ranges
+            .iter()
+            .map(|range| {
+                if range.is_empty() {
+                    Some(Bytes::new())
+                } else {
+                    self.cached_range(range)
+                }
+            })
+            .collect::<Option<Vec<_>>>()
+        {
+            return Ok(cached);
         }
         let mut output = Vec::with_capacity(ranges.len());
         let mut start = 0;

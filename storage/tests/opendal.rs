@@ -412,3 +412,36 @@ async fn byte_io_options_preserve_range_order_empty_ranges_and_sequential_cursor
         assert_eq!(reader.read_range(4..8).await.unwrap().as_ref(), b"efgh");
     }
 }
+
+#[tokio::test]
+async fn suffix_prefetch_preserves_filesystem_range_and_cursor_contracts() {
+    for contents in [b"".as_slice(), b"independent readers"] {
+        let (_dir, operator) = temp_fs(&[("data.bin", contents)]);
+        let accessor = OpenDalAccessor::new(operator);
+        let mut reader = accessor
+            .open(
+                ByteReadRequest::new("data.bin")
+                    .with_prefetch_suffix(NonZeroUsize::new(64).unwrap()),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            reader.metadata().content_length,
+            Some(contents.len() as u64)
+        );
+        assert_eq!(
+            reader
+                .read_range(0..contents.len() as u64)
+                .await
+                .unwrap()
+                .as_ref(),
+            contents
+        );
+        assert_eq!(
+            open_arrow_access_core::read_all(reader, "test")
+                .await
+                .unwrap(),
+            contents
+        );
+    }
+}

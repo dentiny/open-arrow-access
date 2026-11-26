@@ -7,7 +7,7 @@ use std::{collections::HashMap, num::NonZeroUsize, sync::Arc};
 use crate::error::map_error;
 use futures::TryStreamExt;
 use open_arrow_access_core::{
-    Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, ListRequest, ObjectRef,
+    Accessor, ByteAccessor, ByteReadRequest, ByteReader, Bytes, Capability, ListRequest, ObjectRef,
     ObjectStream, Result, async_trait,
 };
 use opendal::{
@@ -91,10 +91,64 @@ impl OpenDalAccessor {
         Ok(metadata.content_length())
     }
 
+    /// Read the tail with an unchunked reader: resolving a suffix with chunking
+    /// enabled would itself stat before issuing the GET.
+    async fn prefetch_suffix(
+        &self,
+        request: &ByteReadRequest,
+        size: NonZeroUsize,
+    ) -> Result<Option<(u64, Bytes)>> {
+        let path = request.object.locator();
+        if !self.operator.info().capability().read_with_suffix {
+            return Ok(None);
+        }
+        let reader = self
+            .operator()
+            .reader(path)
+            .await
+            .map_err(|e| map_error("open", path, e))?;
+        let mut stream = reader
+            .into_stream(opendal::BytesRange::suffix(size.get() as u64))
+            .await
+            .map_err(|e| map_error("open", path, e))?;
+        let metadata = match stream.metadata().await {
+            Ok(metadata) => metadata,
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    opendal::ErrorKind::Unsupported | opendal::ErrorKind::RangeNotSatisfied
+                ) =>
+            {
+                return Ok(None);
+            }
+            Err(error) => return Err(map_error("open", path, error)),
+        };
+        crate::validation::validate_regular_file(metadata.is_file())?;
+        let len = metadata.content_length();
+        let expected = len.min(size.get() as u64);
+        let mut bytes = Vec::new();
+        while let Some(buffer) = stream
+            .try_next()
+            .await
+            .map_err(|e| map_error("read", path, e))?
+        {
+            crate::validation::validate_chunk_length(
+                buffer.len() as u64,
+                expected - bytes.len() as u64,
+            )?;
+            for chunk in buffer {
+                bytes.extend_from_slice(&chunk);
+            }
+        }
+        crate::validation::validate_read_length(bytes.len() as u64, expected, "open")?;
+        Ok(Some((len, Bytes::from(bytes))))
+    }
+
     async fn open_with_length(
         &self,
         request: ByteReadRequest,
         len: u64,
+        cached: Option<(std::ops::Range<u64>, Bytes)>,
     ) -> Result<Box<dyn ByteReader>> {
         let ByteReadRequest {
             object, options, ..
@@ -124,7 +178,7 @@ impl OpenDalAccessor {
             .await
             .map_err(|error| map_error("read", path, error))?;
         let sequential = SequentialReader::new(stream, object, len, self.chunk_size);
-        Ok(Box::new(RangedReader::new(inner, sequential)))
+        Ok(Box::new(RangedReader::new(inner, sequential, cached)))
     }
 }
 
@@ -195,11 +249,24 @@ impl Accessor for OpenDalAccessor {
     }
 
     async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
+        if let Some(size) = request.prefetch_suffix
+            && request.content_length.is_none()
+            && !self
+                .content_lengths
+                .as_ref()
+                .is_some_and(|lengths| lengths.contains_key(request.object.locator()))
+            && let Some((len, bytes)) = self.prefetch_suffix(&request, size).await?
+        {
+            let range = len - bytes.len() as u64..len;
+            return self
+                .open_with_length(request, len, Some((range, bytes)))
+                .await;
+        }
         let len = match request.content_length {
             Some(length) => length,
             None => self.content_length(request.object.locator()).await?,
         };
-        self.open_with_length(request, len).await
+        self.open_with_length(request, len, None).await
     }
 }
 

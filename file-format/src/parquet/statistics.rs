@@ -23,7 +23,7 @@ where
         let input = self
             .binding
             .storage()
-            .open(ByteReadRequest::from(&request))
+            .open(super::input::byte_request(&request))
             .await?;
         validate_input(input.as_ref(), parquet_statistics_input_error)?;
         let source_bytes = input

@@ -33,12 +33,16 @@ impl ReaderFactory for ParquetFormat {
         Ok(())
     }
 
+    fn byte_request(&self, request: &ReadRequest) -> ByteReadRequest {
+        super::input::byte_request(request)
+    }
+
     async fn metadata(
         &self,
         storage: &dyn Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
         request: ReadRequest,
     ) -> Result<RecordMetadata> {
-        let input = storage.open(ByteReadRequest::from(&request)).await?;
+        let input = storage.open(super::input::byte_request(&request)).await?;
         validate_input(input.as_ref(), parquet_input_error)?;
         let builder = ParquetRecordBatchStreamBuilder::new(ParquetInput::new(input))
             .await
