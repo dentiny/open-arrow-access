@@ -7,7 +7,7 @@ updates:
       day: "monday"
     open-pull-requests-limit: 5
     # These families follow the recorded Lance baseline. Update their manifests,
-    # lockfile, metadata, and docs together as described in docs/dependencies.md.
+    # lockfile, compatibility metadata, and dependency examples together.
     # Ignore rules also exclude these families from Dependabot security updates.
     ignore:
       - dependency-name: "arrow*"
