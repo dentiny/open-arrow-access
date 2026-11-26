@@ -13,6 +13,151 @@ fn request() -> ReadRequest {
     ReadRequest::new("book.rdf")
 }
 
+mod file_concurrency {
+    use super::*;
+    use open_arrow_access_core::{
+        ByteMetadata, ByteReadRequest, ByteReader, Bytes, Capability, Reader, Result, async_trait,
+    };
+    use open_arrow_access_service::gutenberg::{GutenbergBookDecoder, GutenbergBooks};
+    use std::sync::{
+        Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    #[derive(Default)]
+    struct Observations {
+        active: AtomicUsize,
+        peak: AtomicUsize,
+        completed: Mutex<Vec<String>>,
+    }
+
+    struct Files(Arc<Observations>);
+    struct File {
+        inner: Box<dyn ByteReader>,
+        observed: Arc<Observations>,
+        uri: String,
+        finished: bool,
+    }
+
+    impl Drop for File {
+        fn drop(&mut self) {
+            self.observed.active.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+
+    #[async_trait]
+    impl Accessor for Files {
+        type Request = ByteReadRequest;
+        type Reader = dyn ByteReader;
+
+        fn capability(&self) -> Capability {
+            MemoryAccessor::new(b"", 1).capability()
+        }
+
+        async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
+            let uri = request.object.locator().to_owned();
+            let inner = MemoryAccessor::new(uri.as_bytes(), 8).open(request).await?;
+            let active = self.0.active.fetch_add(1, Ordering::SeqCst) + 1;
+            self.0.peak.fetch_max(active, Ordering::SeqCst);
+            Ok(Box::new(File {
+                inner,
+                observed: self.0.clone(),
+                uri,
+                finished: false,
+            }))
+        }
+    }
+
+    #[async_trait]
+    impl Reader for File {
+        type Item = Bytes;
+        type Metadata = ByteMetadata;
+        type Capability = Capability;
+
+        fn capability(&self) -> Capability {
+            self.inner.capability()
+        }
+        fn metadata(&self) -> &ByteMetadata {
+            self.inner.metadata()
+        }
+
+        async fn next(&mut self) -> Result<Option<Bytes>> {
+            // Deliberately complete ZIP before TXT without wall-clock sleeps.
+            for _ in 0..if self.uri.ends_with(".zip") { 1 } else { 6 } {
+                tokio::task::yield_now().await;
+            }
+            let result = self.inner.next().await?;
+            if result.is_none() && !self.finished {
+                self.finished = true;
+                self.observed
+                    .completed
+                    .lock()
+                    .unwrap()
+                    .push(self.uri.clone());
+            }
+            Ok(result)
+        }
+    }
+
+    #[async_trait]
+    impl ByteReader for File {}
+
+    #[rstest::rstest]
+    #[tokio::test]
+    async fn bounded_reads_keep_original_order_and_duplicates(#[values(1, 2, 4)] limit: usize) {
+        let raw = fixture!("gutenberg", "book.rdf").await;
+        let observed = Arc::new(Observations::default());
+        let mut decoder = GutenbergBookDecoder::new(Files(observed.clone()));
+        // Exercise the default sequential behavior as well as explicit limits.
+        if limit != 1 {
+            decoder = decoder.with_file_concurrency(NonZeroUsize::new(limit).unwrap());
+        }
+        let books = GutenbergBooks::new(MemoryAccessor::new(&raw, 17), decoder);
+        let mut reader = books.open(request()).await.unwrap();
+        assert_eq!(observed.active.load(Ordering::SeqCst), 0);
+        let batch = reader.next().await.unwrap().unwrap();
+        assert_eq!(batch["raw_rdf"].as_binary::<i64>().value(0), raw);
+        let files = batch["files"].as_list::<i32>().value(0);
+        let entries = files.as_struct();
+        let uris = [
+            "https://example.invalid/42.txt",
+            "https://example.invalid/42.zip",
+            "https://example.invalid/42.txt",
+        ];
+        assert_eq!(entries.len(), uris.len());
+        for (index, uri) in uris.iter().enumerate() {
+            assert_eq!(entries["uri"].as_string::<i32>().value(index), *uri);
+            assert_eq!(
+                entries["data"].as_binary::<i64>().value(index),
+                uri.as_bytes()
+            );
+        }
+        assert_eq!(observed.peak.load(Ordering::SeqCst), limit.min(3));
+        assert_eq!(observed.active.load(Ordering::SeqCst), 0);
+        let completed = observed.completed.lock().unwrap();
+        assert_eq!(completed.len(), 3);
+        assert_eq!(completed[0], uris[if limit == 1 { 0 } else { 1 }]);
+    }
+
+    #[tokio::test]
+    async fn dropping_pending_book_drops_all_file_readers() {
+        let raw = fixture!("gutenberg", "book.rdf").await;
+        let observed = Arc::new(Observations::default());
+        let books = GutenbergBooks::new(
+            MemoryAccessor::new(&raw, 17),
+            GutenbergBookDecoder::new(Files(observed.clone()))
+                .with_file_concurrency(NonZeroUsize::new(2).unwrap()),
+        );
+        let mut reader = books.open(request()).await.unwrap();
+        let mut reading = Box::pin(reader.next());
+        assert!(futures::poll!(reading.as_mut()).is_pending());
+        assert_eq!(observed.active.load(Ordering::SeqCst), 2);
+        drop(reading);
+        drop(reader);
+        assert_eq!(observed.active.load(Ordering::SeqCst), 0);
+    }
+}
+
 #[tokio::test]
 async fn retains_conflicting_file_declarations_in_metadata_and_books() {
     use open_arrow_access_service::gutenberg::{GutenbergBookDecoder, GutenbergBooks};
@@ -312,8 +457,9 @@ async fn books_skip_unselected_or_absent_files() {
     }
 }
 
+#[rstest::rstest]
 #[tokio::test]
-async fn books_propagate_payload_errors() {
+async fn books_propagate_payload_errors(#[values(1, 2, 4)] concurrency: usize) {
     use open_arrow_access_service::gutenberg::{GutenbergBookDecoder, GutenbergBooks};
     let raw = fixture!("gutenberg", "book.rdf").await;
     for (files, expected) in [
@@ -328,7 +474,8 @@ async fn books_propagate_payload_errors() {
     ] {
         let books = GutenbergBooks::new(
             MemoryAccessor::new(&raw, 17),
-            GutenbergBookDecoder::new(files),
+            GutenbergBookDecoder::new(files)
+                .with_file_concurrency(NonZeroUsize::new(concurrency).unwrap()),
         );
         let mut reader = books.open(request()).await.unwrap();
         assert_eq!(reader.next().await.unwrap_err().kind(), expected);
