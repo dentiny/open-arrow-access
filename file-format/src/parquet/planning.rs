@@ -25,7 +25,10 @@ where
         let storage = self.binding.storage().clone();
         let input = storage.open(super::input::byte_request(&request)).await?;
         validate_input(input.as_ref(), parquet_partition_input_error)?;
-        let identity = input.metadata().clone();
+        let length = input
+            .metadata()
+            .content_length
+            .expect("validated Parquet input length");
         let metadata = ArrowReaderMetadata::load_async(
             &mut ParquetInput::new(input),
             ArrowReaderOptions::default(),
@@ -44,23 +47,11 @@ where
             let storage = storage.clone();
             let metadata = metadata.clone();
             let request = request.clone();
-            let identity = identity.clone();
             Box::pin(async move {
-                // A zero-column projection can emit row counts entirely from
-                // footer metadata, so no conditional data GET would validate it.
-                let input = if request
-                    .options
-                    .projection
-                    .as_ref()
-                    .is_some_and(Vec::is_empty)
-                {
-                    storage.open(ByteReadRequest::from(&request)).await?
-                } else {
-                    storage
-                        .open_with_metadata(ByteReadRequest::from(&request), &identity)
-                        .await?
-                };
-                validate_partition_input(input.as_ref(), &identity)?;
+                let input = storage
+                    .open(ByteReadRequest::from(&request).with_content_length(length))
+                    .await?;
+                validate_partition_input(input.as_ref(), length)?;
                 let builder = ParquetRecordBatchStreamBuilder::new_with_metadata(
                     ParquetInput::new(input),
                     metadata,

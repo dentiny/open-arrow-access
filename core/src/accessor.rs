@@ -56,20 +56,6 @@ pub trait Accessor: Send + Sync {
     /// are subsequently returned by [`Reader::next`].
     async fn open(&self, request: Self::Request) -> Result<Box<Self::Reader>>;
 
-    /// Open another reader for an object whose metadata was already inspected.
-    ///
-    /// The default performs an ordinary open. Backends may reuse metadata to
-    /// avoid repeated stat requests only when they can bind all subsequent reads
-    /// to the supplied object version. A version mismatch may surface on the
-    /// first read. Callers still validate the returned metadata for their format.
-    async fn open_with_metadata(
-        &self,
-        request: Self::Request,
-        _metadata: &<Self::Reader as Reader>::Metadata,
-    ) -> Result<Box<Self::Reader>> {
-        self.open(request).await
-    }
-
     /// Open for sequential consumption through `Reader::next` only.
     ///
     /// Defaults to `open`. Byte backends can avoid eager length/stat requests;
@@ -108,14 +94,6 @@ impl<A: Accessor + ?Sized> Accessor for Arc<A> {
 
     async fn open(&self, request: Self::Request) -> Result<Box<Self::Reader>> {
         (**self).open(request).await
-    }
-
-    async fn open_with_metadata(
-        &self,
-        request: Self::Request,
-        metadata: &<Self::Reader as Reader>::Metadata,
-    ) -> Result<Box<Self::Reader>> {
-        (**self).open_with_metadata(request, metadata).await
     }
 
     async fn open_sequential(&self, request: Self::Request) -> Result<Box<Self::Reader>> {

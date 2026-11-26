@@ -1,4 +1,4 @@
-use open_arrow_access_core::{ByteMetadata, ByteReader, Error, Result};
+use open_arrow_access_core::{ByteReader, Error, Result};
 
 use super::error::{
     parquet_partition_changed, parquet_partition_input_error, parquet_statistics_row_count_error,
@@ -18,14 +18,9 @@ pub(super) fn validate_input(
     Ok(())
 }
 
-pub(super) fn validate_partition_input(
-    input: &dyn ByteReader,
-    identity: &ByteMetadata,
-) -> Result<()> {
+pub(super) fn validate_partition_input(input: &dyn ByteReader, length: u64) -> Result<()> {
     validate_input(input, parquet_partition_input_error)?;
-    if input.metadata().content_length != identity.content_length
-        || input.metadata().version != identity.version
-    {
+    if input.metadata().content_length != Some(length) {
         return Err(parquet_partition_changed());
     }
     Ok(())
