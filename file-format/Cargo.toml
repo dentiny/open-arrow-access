@@ -107,7 +107,3 @@ required-features = ["json"]
 [[test]]
 name = "parquet_compression"
 required-features = ["parquet"]
-
-[[test]]
-name = "parquet_snapshot"
-required-features = ["parquet"]
