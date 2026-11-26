@@ -16,32 +16,25 @@ fn request() -> ReadRequest {
 mod file_concurrency {
     use super::*;
     use open_arrow_access_core::{
-        ByteMetadata, ByteReadRequest, ByteReader, Bytes, Capability, Reader, Result, async_trait,
+        ByteMetadata, ByteReadRequest, ByteReader, Bytes, Capability, Result, StreamReader,
+        async_trait,
     };
     use open_arrow_access_service::gutenberg::{GutenbergBookDecoder, GutenbergBooks};
-    use std::sync::{
-        Arc, Mutex,
-        atomic::{AtomicUsize, Ordering},
-    };
+    use std::sync::{Arc, Mutex};
 
     #[derive(Default)]
     struct Observations {
-        active: AtomicUsize,
-        peak: AtomicUsize,
-        completed: Mutex<Vec<String>>,
+        active: usize,
+        peak: usize,
+        completed: Vec<String>,
     }
 
-    struct Files(Arc<Observations>);
-    struct File {
-        inner: Box<dyn ByteReader>,
-        observed: Arc<Observations>,
-        uri: String,
-        finished: bool,
-    }
+    struct Files(Arc<Mutex<Observations>>);
+    struct InFlight(Arc<Mutex<Observations>>);
 
-    impl Drop for File {
+    impl Drop for InFlight {
         fn drop(&mut self) {
-            self.observed.active.fetch_sub(1, Ordering::SeqCst);
+            self.0.lock().unwrap().active -= 1;
         }
     }
 
@@ -56,57 +49,36 @@ mod file_concurrency {
 
         async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
             let uri = request.object.locator().to_owned();
-            let inner = MemoryAccessor::new(uri.as_bytes(), 8).open(request).await?;
-            let active = self.0.active.fetch_add(1, Ordering::SeqCst) + 1;
-            self.0.peak.fetch_max(active, Ordering::SeqCst);
-            Ok(Box::new(File {
-                inner,
-                observed: self.0.clone(),
-                uri,
-                finished: false,
-            }))
+            {
+                let mut observed = self.0.lock().unwrap();
+                observed.active += 1;
+                observed.peak = observed.peak.max(observed.active);
+            }
+            let in_flight = InFlight(self.0.clone());
+            let stream = futures::stream::once(async move {
+                let in_flight = in_flight;
+                // Deliberately complete ZIP before TXT without wall-clock sleeps.
+                for _ in 0..if uri.ends_with(".zip") { 1 } else { 6 } {
+                    tokio::task::yield_now().await;
+                }
+                in_flight.0.lock().unwrap().completed.push(uri.clone());
+                Ok(Bytes::from(uri))
+            });
+            Ok(Box::new(StreamReader::bytes(
+                stream,
+                ByteMetadata {
+                    source: Some(request.object),
+                    ..Default::default()
+                },
+            )))
         }
     }
-
-    #[async_trait]
-    impl Reader for File {
-        type Item = Bytes;
-        type Metadata = ByteMetadata;
-        type Capability = Capability;
-
-        fn capability(&self) -> Capability {
-            self.inner.capability()
-        }
-        fn metadata(&self) -> &ByteMetadata {
-            self.inner.metadata()
-        }
-
-        async fn next(&mut self) -> Result<Option<Bytes>> {
-            // Deliberately complete ZIP before TXT without wall-clock sleeps.
-            for _ in 0..if self.uri.ends_with(".zip") { 1 } else { 6 } {
-                tokio::task::yield_now().await;
-            }
-            let result = self.inner.next().await?;
-            if result.is_none() && !self.finished {
-                self.finished = true;
-                self.observed
-                    .completed
-                    .lock()
-                    .unwrap()
-                    .push(self.uri.clone());
-            }
-            Ok(result)
-        }
-    }
-
-    #[async_trait]
-    impl ByteReader for File {}
 
     #[rstest::rstest]
     #[tokio::test]
     async fn bounded_reads_keep_original_order_and_duplicates(#[values(1, 2, 4)] limit: usize) {
         let raw = fixture!("gutenberg", "book.rdf").await;
-        let observed = Arc::new(Observations::default());
+        let observed = Arc::new(Mutex::new(Observations::default()));
         let mut decoder = GutenbergBookDecoder::new(Files(observed.clone()));
         // Exercise the default sequential behavior as well as explicit limits.
         if limit != 1 {
@@ -114,7 +86,7 @@ mod file_concurrency {
         }
         let books = GutenbergBooks::new(MemoryAccessor::new(&raw, 17), decoder);
         let mut reader = books.open(request()).await.unwrap();
-        assert_eq!(observed.active.load(Ordering::SeqCst), 0);
+        assert_eq!(observed.lock().unwrap().active, 0);
         let batch = reader.next().await.unwrap().unwrap();
         assert_eq!(batch["raw_rdf"].as_binary::<i64>().value(0), raw);
         let files = batch["files"].as_list::<i32>().value(0);
@@ -132,9 +104,10 @@ mod file_concurrency {
                 uri.as_bytes()
             );
         }
-        assert_eq!(observed.peak.load(Ordering::SeqCst), limit.min(3));
-        assert_eq!(observed.active.load(Ordering::SeqCst), 0);
-        let completed = observed.completed.lock().unwrap();
+        let observed = observed.lock().unwrap();
+        assert_eq!(observed.peak, limit.min(3));
+        assert_eq!(observed.active, 0);
+        let completed = &observed.completed;
         assert_eq!(completed.len(), 3);
         assert_eq!(completed[0], uris[if limit == 1 { 0 } else { 1 }]);
     }
@@ -142,7 +115,7 @@ mod file_concurrency {
     #[tokio::test]
     async fn dropping_pending_book_drops_all_file_readers() {
         let raw = fixture!("gutenberg", "book.rdf").await;
-        let observed = Arc::new(Observations::default());
+        let observed = Arc::new(Mutex::new(Observations::default()));
         let books = GutenbergBooks::new(
             MemoryAccessor::new(&raw, 17),
             GutenbergBookDecoder::new(Files(observed.clone()))
@@ -151,10 +124,10 @@ mod file_concurrency {
         let mut reader = books.open(request()).await.unwrap();
         let mut reading = Box::pin(reader.next());
         assert!(futures::poll!(reading.as_mut()).is_pending());
-        assert_eq!(observed.active.load(Ordering::SeqCst), 2);
+        assert_eq!(observed.lock().unwrap().active, 2);
         drop(reading);
         drop(reader);
-        assert_eq!(observed.active.load(Ordering::SeqCst), 0);
+        assert_eq!(observed.lock().unwrap().active, 0);
     }
 }
 

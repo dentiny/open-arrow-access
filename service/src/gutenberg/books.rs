@@ -122,6 +122,7 @@ where
                     let list = batch["files"].as_list::<i32>();
                     let entries = list.values().as_struct();
                     let uris = entries["uri"].as_string::<i32>();
+                    // Boxing lets async_trait prove the borrowed read stream is Send.
                     let mut reads = stream::iter(uris.iter().flatten())
                         .map(|uri| {
                             read_object(
@@ -130,7 +131,8 @@ where
                                 "read_gutenberg_file",
                             )
                         })
-                        .buffered(self.file_concurrency.get());
+                        .buffered(self.file_concurrency.get())
+                        .boxed();
                     let mut payloads = LargeBinaryBuilder::new();
                     while let Some(payload) = reads.try_next().await? {
                         // Release each source buffer after appending instead of
