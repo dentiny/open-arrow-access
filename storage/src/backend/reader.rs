@@ -225,6 +225,21 @@ impl SequentialReader {
         }
     }
 
+    pub(super) fn with_prefix(
+        stream: opendal::BufferStream,
+        object: ObjectRef,
+        len: u64,
+        chunk_size: NonZeroUsize,
+        prefix: Option<opendal::Buffer>,
+    ) -> Self {
+        let mut reader = Self::new(stream, object, len, chunk_size);
+        if let Some(prefix) = prefix {
+            let input = reader.input.as_mut().expect("new reader owns its input");
+            input.pending = prefix;
+        }
+        reader
+    }
+
     fn length(&self) -> u64 {
         // Construction always supplies a length; metadata is immutable after it.
         self.metadata

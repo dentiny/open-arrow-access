@@ -1,5 +1,6 @@
 //! Shared OpenDAL byte access.
 
+mod prefix;
 mod reader;
 
 use std::{collections::HashMap, num::NonZeroUsize, sync::Arc};
@@ -144,6 +145,49 @@ impl OpenDalAccessor {
         Ok(Some((len, Bytes::from(bytes))))
     }
 
+    async fn open_chunked_http(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
+        let path = request.object.locator();
+        let size = request
+            .options
+            .io_chunk_size
+            .map_or(DEFAULT_IO_CHUNK_SIZE, |size| size.get());
+        let operator = self.operator().layer(prefix::PrefixLayer(size));
+        let reader = operator
+            .reader(path)
+            .await
+            .map_err(|e| map_error("open", path, e))?;
+        let mut stream = reader
+            .into_stream(..)
+            .await
+            .map_err(|e| map_error("open", path, e))?;
+        let metadata = stream
+            .metadata()
+            .await
+            .map_err(|e| map_error("open", path, e))?;
+        crate::validation::validate_regular_file(metadata.is_file())?;
+        let len = metadata.content_length();
+        let expected = len.min(size as u64);
+        let mut buffers = Vec::new();
+        let mut received = 0;
+        while let Some(buffer) = stream
+            .try_next()
+            .await
+            .map_err(|e| map_error("read", path, e))?
+        {
+            crate::validation::validate_chunk_length(buffer.len() as u64, expected - received)?;
+            received += buffer.len() as u64;
+            buffers.push(buffer);
+        }
+        crate::validation::validate_read_length(received, expected, "open")?;
+        // Complete the bootstrap body before any remaining range can need a
+        // permit, including when the shared HTTP limit is one.
+        drop(stream);
+        let prefix: opendal::Buffer = buffers.into_iter().flatten().collect();
+        let bytes = prefix.to_bytes();
+        self.open_with_length(request, len, Some((0..received, bytes)))
+            .await
+    }
+
     async fn open_with_length(
         &self,
         request: ByteReadRequest,
@@ -172,12 +216,18 @@ impl OpenDalAccessor {
             )
             .gap(0);
         let inner = builder.await.map_err(|e| map_error("open", path, e))?;
+        let prefix = cached
+            .as_ref()
+            .filter(|(range, _)| range.start == 0)
+            .map(|(_, bytes)| opendal::Buffer::from(bytes.clone()));
+        let start = prefix.as_ref().map_or(0, |buffer| buffer.len() as u64);
         let stream = inner
             .clone()
-            .into_stream(0..len)
+            .into_stream(start..len)
             .await
             .map_err(|error| map_error("read", path, error))?;
-        let sequential = SequentialReader::new(stream, object, len, self.chunk_size);
+        let sequential =
+            SequentialReader::with_prefix(stream, object, len, self.chunk_size, prefix);
         Ok(Box::new(RangedReader::new(inner, sequential, cached)))
     }
 }
@@ -204,6 +254,16 @@ impl Accessor for OpenDalAccessor {
 
     async fn open_sequential(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
         let path = request.object.locator();
+        if self.operator.info().scheme() == "http"
+            && request.content_length.is_none()
+            && (request.options.io_chunk_size.is_some() || request.options.io_concurrency.get() > 1)
+            && !self
+                .content_lengths
+                .as_ref()
+                .is_some_and(|lengths| lengths.contains_key(path))
+        {
+            return self.open_chunked_http(request).await;
+        }
         if request.content_length.is_some()
             || request.options.io_chunk_size.is_some()
             || request.options.io_concurrency.get() > 1
