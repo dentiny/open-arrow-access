@@ -100,6 +100,20 @@ where
             .map(|reader| reader.instrument(self.exporter.clone()))
     }
 
+    async fn open_with_metadata(
+        &self,
+        request: A::Request,
+        metadata: &<Self::Reader as Reader>::Metadata,
+    ) -> Result<Box<A::Reader>> {
+        Call::observe(
+            &self.exporter,
+            "open",
+            self.inner.open_with_metadata(request, metadata),
+        )
+        .await
+        .map(|reader| reader.instrument(self.exporter.clone()))
+    }
+
     async fn open_sequential(&self, request: A::Request) -> Result<Box<A::Reader>> {
         Call::observe(&self.exporter, "open", self.inner.open_sequential(request))
             .await

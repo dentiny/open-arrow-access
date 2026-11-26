@@ -46,7 +46,20 @@ where
             let request = request.clone();
             let identity = identity.clone();
             Box::pin(async move {
-                let input = storage.open(ByteReadRequest::from(&request)).await?;
+                // A zero-column projection can emit row counts entirely from
+                // footer metadata, so no conditional data GET would validate it.
+                let input = if request
+                    .options
+                    .projection
+                    .as_ref()
+                    .is_some_and(Vec::is_empty)
+                {
+                    storage.open(ByteReadRequest::from(&request)).await?
+                } else {
+                    storage
+                        .open_with_metadata(ByteReadRequest::from(&request), &identity)
+                        .await?
+                };
                 validate_partition_input(input.as_ref(), &identity)?;
                 let builder = ParquetRecordBatchStreamBuilder::new_with_metadata(
                     ParquetInput::new(input),

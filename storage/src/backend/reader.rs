@@ -240,6 +240,10 @@ impl SequentialReader {
         reader
     }
 
+    pub(super) fn set_version(&mut self, version: Option<String>) {
+        self.metadata.version = version;
+    }
+
     fn length(&self) -> u64 {
         // Construction always supplies a length; metadata is immutable after it.
         self.metadata

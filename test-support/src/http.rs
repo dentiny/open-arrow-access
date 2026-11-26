@@ -250,6 +250,10 @@ fn request_range(header: &str, len: usize) -> Range<usize> {
         .unwrap()
         .split_once('-')
         .unwrap();
+    if start.is_empty() {
+        let size = end.parse::<usize>().unwrap();
+        return len.saturating_sub(size)..len;
+    }
     let end = if end.is_empty() {
         len
     } else {

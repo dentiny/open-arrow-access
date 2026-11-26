@@ -8,8 +8,8 @@ use std::{collections::HashMap, num::NonZeroUsize, sync::Arc};
 use crate::error::map_error;
 use futures::TryStreamExt;
 use open_arrow_access_core::{
-    Accessor, ByteAccessor, ByteReadRequest, ByteReader, Bytes, Capability, ListRequest, ObjectRef,
-    ObjectStream, Result, async_trait,
+    Accessor, ByteAccessor, ByteMetadata, ByteReadRequest, ByteReader, Bytes, Capability,
+    ListRequest, ObjectRef, ObjectStream, Result, async_trait,
 };
 use opendal::{
     Execute, Executor, OperationContext, Operator,
@@ -75,13 +75,13 @@ impl OpenDalAccessor {
         self
     }
 
-    async fn content_length(&self, path: &str) -> Result<u64> {
+    async fn content_metadata(&self, path: &str) -> Result<(u64, Option<String>)> {
         if let Some(len) = self
             .content_lengths
             .as_ref()
             .and_then(|lengths| lengths.get(path))
         {
-            return Ok(*len);
+            return Ok((*len, None));
         }
         let metadata = self
             .operator()
@@ -89,7 +89,18 @@ impl OpenDalAccessor {
             .await
             .map_err(|e| map_error("stat", path, e))?;
         crate::validation::validate_regular_file(metadata.is_file())?;
-        Ok(metadata.content_length())
+        Ok((metadata.content_length(), self.read_version(&metadata)))
+    }
+
+    fn read_version(&self, metadata: &opendal::Metadata) -> Option<String> {
+        if self.operator.info().capability().read_with_if_match {
+            metadata
+                .etag()
+                .filter(|etag| strong_etag(etag))
+                .map(str::to_owned)
+        } else {
+            None
+        }
     }
 
     /// Read the tail with an unchunked reader: resolving a suffix with chunking
@@ -98,7 +109,7 @@ impl OpenDalAccessor {
         &self,
         request: &ByteReadRequest,
         size: NonZeroUsize,
-    ) -> Result<Option<(u64, Bytes)>> {
+    ) -> Result<Option<(opendal::Metadata, Bytes)>> {
         let path = request.object.locator();
         if !self.operator.info().capability().read_with_suffix {
             return Ok(None);
@@ -142,7 +153,7 @@ impl OpenDalAccessor {
             }
         }
         crate::validation::validate_read_length(bytes.len() as u64, expected, "open")?;
-        Ok(Some((len, Bytes::from(bytes))))
+        Ok(Some((metadata, Bytes::from(bytes))))
     }
 
     async fn open_chunked_http(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
@@ -184,8 +195,13 @@ impl OpenDalAccessor {
         drop(stream);
         let prefix: opendal::Buffer = buffers.into_iter().flatten().collect();
         let bytes = prefix.to_bytes();
-        self.open_with_length(request, len, Some((0..received, bytes)))
-            .await
+        self.open_with_length(
+            request,
+            len,
+            Some((0..received, bytes)),
+            self.read_version(&metadata),
+        )
+        .await
     }
 
     async fn open_with_length(
@@ -193,6 +209,7 @@ impl OpenDalAccessor {
         request: ByteReadRequest,
         len: u64,
         cached: Option<(std::ops::Range<u64>, Bytes)>,
+        version: Option<String>,
     ) -> Result<Box<dyn ByteReader>> {
         let ByteReadRequest {
             object, options, ..
@@ -205,7 +222,7 @@ impl OpenDalAccessor {
             operator = operator.layer(ReaderBudget(options.io_concurrency.get()));
         }
         // Coalesce adjacent ranges without fetching unrequested gaps.
-        let builder = operator
+        let mut builder = operator
             .reader_with(path)
             .content_length_hint(len)
             .concurrent(options.io_concurrency.get())
@@ -215,6 +232,9 @@ impl OpenDalAccessor {
                     .map_or(DEFAULT_IO_CHUNK_SIZE, |v| v.get()),
             )
             .gap(0);
+        if let Some(version) = &version {
+            builder = builder.if_match(version);
+        }
         let inner = builder.await.map_err(|e| map_error("open", path, e))?;
         let prefix = cached
             .as_ref()
@@ -226,8 +246,9 @@ impl OpenDalAccessor {
             .into_stream(start..len)
             .await
             .map_err(|error| map_error("read", path, error))?;
-        let sequential =
+        let mut sequential =
             SequentialReader::with_prefix(stream, object, len, self.chunk_size, prefix);
+        sequential.set_version(version);
         Ok(Box::new(RangedReader::new(inner, sequential, cached)))
     }
 }
@@ -308,6 +329,25 @@ impl Accessor for OpenDalAccessor {
         )))
     }
 
+    async fn open_with_metadata(
+        &self,
+        request: ByteReadRequest,
+        metadata: &ByteMetadata,
+    ) -> Result<Box<dyn ByteReader>> {
+        if metadata.source.as_ref() == Some(&request.object)
+            && let (Some(len), Some(version)) =
+                (metadata.content_length, metadata.version.as_deref())
+            && request.content_length.is_none_or(|hint| hint == len)
+            && strong_etag(version)
+            && self.operator.info().capability().read_with_if_match
+        {
+            return self
+                .open_with_length(request, len, None, Some(version.to_owned()))
+                .await;
+        }
+        self.open(request).await
+    }
+
     async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
         if let Some(size) = request.prefetch_suffix
             && request.content_length.is_none()
@@ -315,18 +355,20 @@ impl Accessor for OpenDalAccessor {
                 .content_lengths
                 .as_ref()
                 .is_some_and(|lengths| lengths.contains_key(request.object.locator()))
-            && let Some((len, bytes)) = self.prefetch_suffix(&request, size).await?
+            && let Some((metadata, bytes)) = self.prefetch_suffix(&request, size).await?
         {
+            let len = metadata.content_length();
+            let version = self.read_version(&metadata);
             let range = len - bytes.len() as u64..len;
             return self
-                .open_with_length(request, len, Some((range, bytes)))
+                .open_with_length(request, len, Some((range, bytes)), version)
                 .await;
         }
-        let len = match request.content_length {
-            Some(length) => length,
-            None => self.content_length(request.object.locator()).await?,
+        let (len, version) = match request.content_length {
+            Some(length) => (length, None),
+            None => self.content_metadata(request.object.locator()).await?,
         };
-        self.open_with_length(request, len, None).await
+        self.open_with_length(request, len, None, version).await
     }
 }
 
@@ -388,4 +430,15 @@ impl Execute for ReaderExecutor {
     fn timeout(&self) -> Option<BoxedStaticFuture<()>> {
         self.inner.timeout()
     }
+}
+
+// Weak ETags cannot be used with If-Match's strong comparison. Do not treat
+// arbitrary version strings or multiple validators as a reusable snapshot.
+fn strong_etag(value: &str) -> bool {
+    value.len() >= 2
+        && value.starts_with('"')
+        && value.ends_with('"')
+        && value.as_bytes()[1..value.len() - 1]
+            .iter()
+            .all(|byte| *byte == 0x21 || (0x23..=0x7e).contains(byte) || *byte >= 0x80)
 }
