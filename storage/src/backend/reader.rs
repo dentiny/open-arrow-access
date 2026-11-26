@@ -56,16 +56,17 @@ pub(super) struct RangedReader {
 }
 
 impl RangedReader {
-    pub(super) fn new(
-        inner: opendal::Reader,
-        sequential: SequentialReader,
-        prefetched: Option<PrefetchedRange>,
-    ) -> Self {
+    pub(super) fn new(inner: opendal::Reader, sequential: SequentialReader) -> Self {
         Self {
             inner,
             sequential,
-            prefetched,
+            prefetched: None,
         }
+    }
+
+    pub(super) fn with_prefetched(mut self, prefetched: PrefetchedRange) -> Self {
+        self.prefetched = Some(prefetched);
+        self
     }
 
     fn cached_range(&self, range: &Range<u64>) -> Option<Bytes> {

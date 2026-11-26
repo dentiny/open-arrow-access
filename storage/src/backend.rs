@@ -265,7 +265,11 @@ impl OpenDalAccessor {
             .map_err(|error| map_error("read", path, error))?;
         let sequential =
             SequentialReader::with_prefix(stream, object, length, self.chunk_size, prefix);
-        Ok(Box::new(RangedReader::new(inner, sequential, prefetched)))
+        let mut reader = RangedReader::new(inner, sequential);
+        if let Some(prefetched) = prefetched {
+            reader = reader.with_prefetched(prefetched);
+        }
+        Ok(Box::new(reader))
     }
 }
 
