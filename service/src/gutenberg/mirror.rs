@@ -1,10 +1,12 @@
 //! Explicit routing from advertised Gutenberg URLs to a caller-owned mirror.
 
+use std::ops::Range;
+
 use super::{error, validation};
 
 use open_arrow_access_core::{
-    Accessor, ByteAccessor, ByteMetadata, ByteReadRequest, ByteReader, Capability, Result,
-    async_trait,
+    Accessor, ByteAccessor, ByteMetadata, BytePosition, ByteReadRequest, ByteReader, Bytes,
+    Capability, ErrorKind, Reader, Result, async_trait,
 };
 
 /// Read advertised Gutenberg file URLs from a caller-configured mirror.
@@ -12,7 +14,9 @@ use open_arrow_access_core::{
 /// `prefix` is relative to the wrapped accessor's root. The mirror must expose
 /// the main digit tree and generated files beneath `cache/epub/`. URI aliases
 /// are resolved without changing the original RDF or Arrow metadata fields.
-/// Missing files and unsupported URLs remain errors; there is no fallback.
+/// UTF-8 text aliases try `pg<ID>.txt`, then `pg<ID>.txt.utf8` only on
+/// NotFound before any bytes are delivered. Other missing files and unsupported
+/// URLs remain errors; advertised formats are never substituted.
 /// Discovery is not supported. Read options and the backend's sequential-open
 /// and metadata paths are preserved.
 pub struct GutenbergMirror<A> {
@@ -28,15 +32,30 @@ impl<A> GutenbergMirror<A> {
         }
     }
 
-    fn map_request(&self, mut request: ByteReadRequest) -> Result<ByteReadRequest> {
+    fn map_request(
+        &self,
+        mut request: ByteReadRequest,
+    ) -> Result<(ByteReadRequest, Option<ByteReadRequest>)> {
         let path = mirror_path(request.object.locator())?;
+        // Only this advertised alias has two known generated mirror filenames.
+        // Exact file URLs must never fall back to another representation.
+        let url = url::Url::parse(request.object.locator()).expect("validated mirror URL");
+        let decoded = percent_encoding::percent_decode_str(url.path())
+            .decode_utf8()
+            .expect("validated mirror path");
+        let utf8_alias = decoded.starts_with("/ebooks/") && decoded.ends_with(".txt.utf-8");
         request.object = if self.prefix.is_empty() {
             path
         } else {
             format!("{}/{path}", self.prefix)
         }
         .into();
-        Ok(request)
+        let alternate = utf8_alias.then(|| {
+            let mut alternate = request.clone();
+            alternate.object = format!("{}.utf8", request.object.locator()).into();
+            alternate
+        });
+        Ok((request, alternate))
     }
 }
 
@@ -55,21 +74,31 @@ where
     }
 
     async fn metadata(&self, request: ByteReadRequest) -> Result<ByteMetadata> {
-        self.inner.metadata(self.map_request(request)?).await
+        let (request, alternate) = self.map_request(request)?;
+        match self.inner.metadata(request).await {
+            Err(error) if error.kind() == ErrorKind::NotFound && alternate.is_some() => {
+                self.inner.metadata(alternate.unwrap()).await
+            }
+            result => result,
+        }
     }
 
     async fn inspect_metadata(&self, request: ByteReadRequest) -> Result<Option<ByteMetadata>> {
-        self.inner
-            .inspect_metadata(self.map_request(request)?)
-            .await
+        let (request, alternate) = self.map_request(request)?;
+        match self.inner.inspect_metadata(request).await {
+            Err(error) if error.kind() == ErrorKind::NotFound && alternate.is_some() => {
+                self.inner.inspect_metadata(alternate.unwrap()).await
+            }
+            result => result,
+        }
     }
 
     async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
-        self.inner.open(self.map_request(request)?).await
+        self.open_mirror(request, false).await
     }
 
     async fn open_sequential(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
-        self.inner.open_sequential(self.map_request(request)?).await
+        self.open_mirror(request, true).await
     }
 }
 
@@ -77,6 +106,102 @@ where
 impl<A> ByteAccessor for GutenbergMirror<A> where
     A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>
 {
+}
+
+impl<A> GutenbergMirror<A>
+where
+    A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
+{
+    async fn open_inner(
+        &self,
+        request: ByteReadRequest,
+        sequential: bool,
+    ) -> Result<Box<dyn ByteReader>> {
+        if sequential {
+            self.inner.open_sequential(request).await
+        } else {
+            self.inner.open(request).await
+        }
+    }
+
+    async fn open_mirror(
+        &self,
+        request: ByteReadRequest,
+        sequential: bool,
+    ) -> Result<Box<dyn ByteReader>> {
+        let (request, alternate) = self.map_request(request)?;
+        let Some(alternate) = alternate else {
+            return self.open_inner(request, sequential).await;
+        };
+        let result = match self.open_inner(request, sequential).await {
+            Ok(mut reader) => {
+                // Some backends defer the GET until next(). Probe once so a
+                // missing alias is resolved before publishing reader metadata.
+                let position = reader.position();
+                match reader.next().await {
+                    Ok(first) => {
+                        return Ok(Box::new(Prefetched {
+                            reader,
+                            first: Some(first),
+                            position,
+                        }));
+                    }
+                    Err(error) => Err(error),
+                }
+            }
+            Err(error) => Err(error),
+        };
+        match result {
+            Err(error) if error.kind() == ErrorKind::NotFound => {
+                self.open_inner(alternate, sequential).await
+            }
+            result => result,
+        }
+    }
+}
+
+/// Retain the probed first chunk without advancing the caller's cursor.
+struct Prefetched {
+    reader: Box<dyn ByteReader>,
+    first: Option<Option<Bytes>>,
+    position: Option<BytePosition>,
+}
+
+#[async_trait]
+impl Reader for Prefetched {
+    type Item = Bytes;
+    type Metadata = ByteMetadata;
+    type Capability = Capability;
+
+    fn capability(&self) -> Capability {
+        self.reader.capability()
+    }
+    fn metadata(&self) -> &ByteMetadata {
+        self.reader.metadata()
+    }
+    async fn next(&mut self) -> Result<Option<Bytes>> {
+        match self.first.take() {
+            Some(first) => Ok(first),
+            None => self.reader.next().await,
+        }
+    }
+}
+
+#[async_trait]
+impl ByteReader for Prefetched {
+    fn position(&self) -> Option<BytePosition> {
+        if self.first.is_some() {
+            self.position
+        } else {
+            self.reader.position()
+        }
+    }
+    async fn read_range(&mut self, range: Range<u64>) -> Result<Bytes> {
+        self.reader.read_range(range).await
+    }
+    async fn read_ranges(&mut self, ranges: Vec<Range<u64>>) -> Result<Vec<Bytes>> {
+        self.reader.read_ranges(ranges).await
+    }
 }
 
 fn mirror_path(uri: &str) -> Result<String> {
