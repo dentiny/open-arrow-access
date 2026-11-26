@@ -24,6 +24,14 @@ pub trait ReaderFactory: Send + Sync {
     /// Validate configuration before storage opens; return configuration errors here.
     fn prepare(&self, request: &Self::Request) -> Result<Self::Prepared>;
 
+    /// Select storage opening hints without changing the caller's I/O options.
+    fn byte_request(&self, request: &Self::Request) -> ByteReadRequest
+    where
+        for<'a> ByteReadRequest: From<&'a Self::Request>,
+    {
+        ByteReadRequest::from(request)
+    }
+
     /// Inspect output metadata through storage. The default opens and drops a reader;
     /// override to avoid decoder construction and opening side effects when possible.
     async fn metadata(
@@ -108,7 +116,7 @@ impl<F: ReaderFactory + ?Sized> ReaderFactoryExt for F {
     where
         for<'a> ByteReadRequest: From<&'a Self::Request>,
     {
-        let byte_request = ByteReadRequest::from(&request);
+        let byte_request = self.byte_request(&request);
         let object = byte_request.object.clone();
         let context = |error: crate::Error| error.with_object(Some(&object));
         let prepared = self.prepare(&request).map_err(context)?;

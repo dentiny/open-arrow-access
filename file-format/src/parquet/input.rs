@@ -1,12 +1,19 @@
-use std::{ops::Range, sync::Arc};
+use std::{num::NonZeroUsize, ops::Range, sync::Arc};
 
 use futures::future::BoxFuture;
-use open_arrow_access_core::{ByteReader, Bytes};
+use open_arrow_access_core::{ByteReadRequest, ByteReader, Bytes, ReadRequest};
 use parquet::{
     arrow::{arrow_reader::ArrowReaderOptions, async_reader::AsyncFileReader},
     errors::Result as ParquetResult,
     file::metadata::{PageIndexPolicy, ParquetMetaData, ParquetMetaDataReader},
 };
+
+const FOOTER_PREFETCH_SIZE: usize = 64 * 1024;
+
+pub(super) fn byte_request(request: &ReadRequest) -> ByteReadRequest {
+    ByteReadRequest::from(request)
+        .with_prefetch_suffix(NonZeroUsize::new(FOOTER_PREFETCH_SIZE).unwrap())
+}
 
 /// Bridge shared byte access to the Parquet decoder.
 pub(super) struct ParquetInput {
@@ -42,6 +49,7 @@ impl ParquetInput {
             .content_length
             .ok_or_else(super::error::unknown_input_length)?;
         let metadata = ParquetMetaDataReader::new()
+            .with_prefetch_hint(Some(FOOTER_PREFETCH_SIZE))
             .with_metadata_options(options.map(|o| o.metadata_options().clone()))
             .with_column_index_policy(
                 options.map_or(PageIndexPolicy::Skip, |o| o.column_index_policy()),

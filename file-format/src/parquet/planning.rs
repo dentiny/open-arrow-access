@@ -23,7 +23,7 @@ where
 {
     async fn plan_file_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
         let storage = self.binding.storage().clone();
-        let input = storage.open(ByteReadRequest::from(&request)).await?;
+        let input = storage.open(super::input::byte_request(&request)).await?;
         validate_input(input.as_ref(), parquet_partition_input_error)?;
         let identity = input.metadata().clone();
         let metadata = ArrowReaderMetadata::load_async(

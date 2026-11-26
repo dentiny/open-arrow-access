@@ -7,18 +7,39 @@ use std::{collections::HashMap, num::NonZeroUsize, sync::Arc};
 use crate::error::map_error;
 use futures::TryStreamExt;
 use open_arrow_access_core::{
-    Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, ListRequest, ObjectRef,
-    ObjectStream, Result, async_trait,
+    Accessor, ByteAccessor, ByteReadOptions, ByteReadRequest, ByteReader, Bytes, Capability,
+    ListRequest, ObjectRef, ObjectStream, Result, async_trait,
 };
 use opendal::{
     Execute, Executor, OperationContext, Operator,
     raw::{BoxedStaticFuture, Layer, Servicer},
 };
-use reader::{RangedReader, SequentialReader};
+use reader::{PrefetchedRange, RangedReader, SequentialReader};
 use tokio::sync::Semaphore;
 
 const DEFAULT_OUTPUT_CHUNK_SIZE: NonZeroUsize = NonZeroUsize::new(64 * 1024).unwrap();
 const DEFAULT_IO_CHUNK_SIZE: usize = 2 * 1024 * 1024;
+
+/// Resolved object metadata and any bytes already fetched while discovering it.
+/// The original request's length hint is no longer needed at this stage.
+struct ReadContent {
+    length: u64,
+    prefetched: Option<PrefetchedRange>,
+}
+
+impl ReadContent {
+    fn new(length: u64) -> Self {
+        Self {
+            length,
+            prefetched: None,
+        }
+    }
+
+    fn with_prefetched(mut self, range: std::ops::Range<u64>, bytes: Bytes) -> Result<Self> {
+        self.prefetched = Some(PrefetchedRange::new(range, bytes, self.length)?);
+        Ok(self)
+    }
+}
 
 /// Generic OpenDAL byte adapter, shared by storage and provider services.
 #[derive(Clone, Debug)]
@@ -91,14 +112,70 @@ impl OpenDalAccessor {
         Ok(metadata.content_length())
     }
 
-    async fn open_with_length(
+    /// Read the tail with an unchunked reader: resolving a suffix with chunking
+    /// enabled would itself stat before issuing the GET.
+    async fn prefetch_suffix(
         &self,
-        request: ByteReadRequest,
-        len: u64,
+        object: &ObjectRef,
+        size: NonZeroUsize,
+    ) -> Result<Option<ReadContent>> {
+        let path = object.locator();
+        if !self.operator.info().capability().read_with_suffix {
+            return Ok(None);
+        }
+        let reader = self
+            .operator()
+            .reader(path)
+            .await
+            .map_err(|e| map_error("open", path, e))?;
+        let mut stream = reader
+            .into_stream(opendal::BytesRange::suffix(size.get() as u64))
+            .await
+            .map_err(|e| map_error("open", path, e))?;
+        let metadata = match stream.metadata().await {
+            Ok(metadata) => metadata,
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    opendal::ErrorKind::Unsupported | opendal::ErrorKind::RangeNotSatisfied
+                ) =>
+            {
+                return Ok(None);
+            }
+            Err(error) => return Err(map_error("open", path, error)),
+        };
+        crate::validation::validate_regular_file(metadata.is_file())?;
+        let len = metadata.content_length();
+        let expected = len.min(size.get() as u64);
+        let mut bytes = Vec::new();
+        while let Some(buffer) = stream
+            .try_next()
+            .await
+            .map_err(|e| map_error("read", path, e))?
+        {
+            crate::validation::validate_chunk_length(
+                buffer.len() as u64,
+                expected - bytes.len() as u64,
+            )?;
+            for chunk in buffer {
+                bytes.extend_from_slice(&chunk);
+            }
+        }
+        crate::validation::validate_read_length(bytes.len() as u64, expected, "open")?;
+        let range = len - bytes.len() as u64..len;
+        Ok(Some(
+            ReadContent::new(len).with_prefetched(range, Bytes::from(bytes))?,
+        ))
+    }
+
+    /// Build the chunked reader after metadata discovery and optional prefetch.
+    async fn open_ranged(
+        &self,
+        object: ObjectRef,
+        options: ByteReadOptions,
+        content: ReadContent,
     ) -> Result<Box<dyn ByteReader>> {
-        let ByteReadRequest {
-            object, options, ..
-        } = request;
+        let ReadContent { length, prefetched } = content;
         let path = object.locator();
         // Share a budget across OpenDAL's stream/fetch queues so interleaved
         // range reads cannot multiply sequential prefetch concurrency.
@@ -109,7 +186,7 @@ impl OpenDalAccessor {
         // Coalesce adjacent ranges without fetching unrequested gaps.
         let builder = operator
             .reader_with(path)
-            .content_length_hint(len)
+            .content_length_hint(length)
             .concurrent(options.io_concurrency.get())
             .chunk(
                 options
@@ -120,11 +197,15 @@ impl OpenDalAccessor {
         let inner = builder.await.map_err(|e| map_error("open", path, e))?;
         let stream = inner
             .clone()
-            .into_stream(0..len)
+            .into_stream(0..length)
             .await
             .map_err(|error| map_error("read", path, error))?;
-        let sequential = SequentialReader::new(stream, object, len, self.chunk_size);
-        Ok(Box::new(RangedReader::new(inner, sequential)))
+        let sequential = SequentialReader::new(stream, object, length, self.chunk_size);
+        let mut reader = RangedReader::new(inner, sequential);
+        if let Some(prefetched) = prefetched {
+            reader = reader.with_prefetched(prefetched);
+        }
+        Ok(Box::new(reader))
     }
 }
 
@@ -195,11 +276,24 @@ impl Accessor for OpenDalAccessor {
     }
 
     async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
+        if let Some(size) = request.prefetch_suffix
+            && request.content_length.is_none()
+            && !self
+                .content_lengths
+                .as_ref()
+                .is_some_and(|lengths| lengths.contains_key(request.object.locator()))
+            && let Some(content) = self.prefetch_suffix(&request.object, size).await?
+        {
+            return self
+                .open_ranged(request.object, request.options, content)
+                .await;
+        }
         let len = match request.content_length {
             Some(length) => length,
             None => self.content_length(request.object.locator()).await?,
         };
-        self.open_with_length(request, len).await
+        self.open_ranged(request.object, request.options, ReadContent::new(len))
+            .await
     }
 }
 
