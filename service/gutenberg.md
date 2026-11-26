@@ -264,7 +264,7 @@ The reader follows advertised files only, not arbitrary HTML image references;
 selecting packaged HTML ZIP/EPUB preserves their contained dependencies.
 
 Opening/metadata inspection does no I/O. Consumption validates the RDF first,
-then reads payloads sequentially, and emits one complete book row. Any missing
+then reads payloads sequentially by default, and emits one complete book row. Any missing
 or corrupt read fails that book; no partial row or silent file omission is
 returned. `extent` and `modified` remain upstream declarations, not verified
 lengths/checksums or snapshot guarantees. Raw bytes do not imply format validity.
@@ -276,6 +276,15 @@ memory depends on total book bytes and concurrent books, not the Arrow batch
 size target. `LargeBinary` is ordinary Arrow binary, not a Lance blob extension.
 No archive extraction, rendering, OCR, charset conversion, text extraction or
 header/footer removal occurs. Those are separate format-specific operations.
+
+Use `GutenbergBookDecoder::new(files).with_file_concurrency(NonZeroUsize::new(4).unwrap())`
+to read up to four files concurrently per book (default: one). Results are appended
+to Arrow in RDF order, preserving duplicates and exact bytes, then their source
+buffers are released. Dropping the decoder future drops outstanding reads; any
+read error fails the whole book without a partial row. File concurrency multiplies
+with concurrent books and is separate from byte-range I/O concurrency. It limits
+requests, not bytes: out-of-order results may wait in memory, and the final Arrow
+row still retains the complete book. Choose limits for the service and memory budget.
 
 The native scan plan has one whole-book partition. A caller can wrap independent
 RDF requests in `FileSetAccessor` and execute them using `ParallelReadLayer` or

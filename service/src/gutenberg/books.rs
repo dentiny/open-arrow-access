@@ -1,10 +1,15 @@
 //! One book with every advertised original file, without format conversion.
 
 use open_arrow_access_core::blob_bytes_field;
-use std::sync::{Arc, OnceLock};
+use std::{
+    num::NonZeroUsize,
+    sync::{Arc, OnceLock},
+};
 
+use arrow_array::builder::LargeBinaryBuilder;
 use arrow_array::{Array, ArrayRef, LargeBinaryArray, ListArray, StructArray, cast::AsArray};
 use arrow_schema::{DataType, Field, Schema};
+use futures::{StreamExt, TryStreamExt, stream};
 use open_arrow_access_core::{
     Accessor, ByteReadRequest, ByteReader, Capability, DocumentAccessor, DocumentDecoder,
     ReadRequest, RecordBatch, RecordCapability, Result, SchemaRef, async_trait, read_object,
@@ -60,11 +65,25 @@ pub type GutenbergBooks<R, F> = DocumentAccessor<R, GutenbergBookDecoder<F>>;
 /// `files` skips payload I/O. The complete book is buffered before emission.
 pub struct GutenbergBookDecoder<F> {
     files: F,
+    file_concurrency: NonZeroUsize,
 }
 
 impl<F> GutenbergBookDecoder<F> {
     pub fn new(files: F) -> Self {
-        Self { files }
+        Self {
+            files,
+            file_concurrency: NonZeroUsize::MIN,
+        }
+    }
+
+    /// Bound simultaneous whole-file reads within each book (default: one).
+    ///
+    /// Advertised order, duplicate entries, bytes and strict errors are retained.
+    /// This limit multiplies with the caller's concurrent book reads and does
+    /// not limit retained bytes: the complete book still fits in one Arrow row.
+    pub fn with_file_concurrency(mut self, concurrency: NonZeroUsize) -> Self {
+        self.file_concurrency = concurrency;
+        self
     }
 }
 
@@ -102,16 +121,23 @@ where
                 "files" => {
                     let list = batch["files"].as_list::<i32>();
                     let entries = list.values().as_struct();
-                    let mut payloads = Vec::with_capacity(entries.len());
-                    for uri in entries["uri"].as_string::<i32>().iter().flatten() {
-                        payloads.push(
+                    let uris = entries["uri"].as_string::<i32>();
+                    // Boxing lets async_trait prove the borrowed read stream is Send.
+                    let mut reads = stream::iter(uris.iter().flatten())
+                        .map(|uri| {
                             read_object(
                                 &self.files,
                                 ByteReadRequest::new(uri).with_options(request.byte_options),
                                 "read_gutenberg_file",
                             )
-                            .await?,
-                        );
+                        })
+                        .buffered(self.file_concurrency.get())
+                        .boxed();
+                    let mut payloads = LargeBinaryBuilder::new();
+                    while let Some(payload) = reads.try_next().await? {
+                        // Release each source buffer after appending instead of
+                        // retaining a second full-book copy until array creation.
+                        payloads.append_value(payload);
                     }
                     let mut fields = entries.fields().to_vec();
                     fields.push(Arc::new(blob_bytes_field(Field::new(
@@ -120,9 +146,7 @@ where
                         false,
                     ))));
                     let mut values = entries.columns().to_vec();
-                    values.push(Arc::new(LargeBinaryArray::from_iter_values(
-                        payloads.iter(),
-                    )));
+                    values.push(Arc::new(payloads.finish()));
                     let values =
                         StructArray::try_new(fields.into(), values, None).map_err(decode_source)?;
                     let item = Arc::new(Field::new("item", values.data_type().clone(), false));
