@@ -396,6 +396,15 @@ async fn chunked_bootstrap_drains_its_body_before_independent_range_reads() {
         .unwrap();
     assert_eq!(requests.1.load(Ordering::SeqCst), 1);
     let position = reader.position();
+    assert_eq!(
+        reader.read_range(1..3).await.unwrap().as_ref(),
+        &bytes[1..3]
+    );
+    let cached = reader.read_ranges(vec![0..2, 2..4]).await.unwrap();
+    assert_eq!(cached[0].as_ref(), &bytes[0..2]);
+    assert_eq!(cached[1].as_ref(), &bytes[2..4]);
+    assert_eq!(requests.0.lock().unwrap().len(), 1);
+    assert_eq!(reader.position(), position);
     let range = tokio::time::timeout(Duration::from_secs(1), reader.read_range(8..10))
         .await
         .unwrap()
