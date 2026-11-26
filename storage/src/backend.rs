@@ -169,35 +169,49 @@ impl OpenDalAccessor {
         ))
     }
 
-    async fn open_chunked_http(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
+    async fn open_chunked(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
         let path = request.object.locator();
         let size = request
             .options
             .io_chunk_size
             .map_or(DEFAULT_IO_CHUNK_SIZE, |size| size.get());
-        let operator = self.operator().layer(prefix::PrefixLayer(size));
-        let reader = operator
-            .reader(path)
-            .await
-            .map_err(|e| map_error("open", path, e))?;
-        let mut stream = reader
-            .into_stream(..)
-            .await
-            .map_err(|e| map_error("open", path, e))?;
-        let metadata = stream
-            .metadata()
-            .await
-            .map_err(|e| map_error("open", path, e))?;
+        let operator = self
+            .operator()
+            .layer(prefix::HttpPrefixValidationLayer(size));
+        let (response, mut stream) = match prefix::open(&operator, path, size).await {
+            Ok(response) => response,
+            // Some backends require the requested range to fit the object
+            // exactly. Discover its length before retrying a smaller range.
+            Err(error) if error.kind() == opendal::ErrorKind::RangeNotSatisfied => {
+                return self.open(request).await;
+            }
+            Err(error) => return Err(map_error("open", path, error)),
+        };
+        let Some(metadata) = response.metadata() else {
+            // Not every backend returns whole-object metadata while opening a
+            // range. Release the stream before the known-length fallback.
+            drop(stream);
+            return self.open(request).await;
+        };
         crate::validation::validate_regular_file(metadata.is_file())?;
         let len = metadata.content_length();
         let expected = len.min(size as u64);
         let mut buffers = Vec::new();
         let mut received = 0;
-        while let Some(buffer) = stream
-            .try_next()
-            .await
-            .map_err(|e| map_error("read", path, e))?
-        {
+        loop {
+            // A bounded OpenDAL stream enforces the requested size at EOF.
+            // For a whole object shorter than that range, metadata supplies the
+            // actual size. HTTP validation has already drained such a body.
+            if expected < size as u64 && received == expected {
+                break;
+            }
+            let buffer = stream
+                .read_dyn()
+                .await
+                .map_err(|e| map_error("read", path, e))?;
+            if buffer.is_empty() {
+                break;
+            }
             crate::validation::validate_chunk_length(buffer.len() as u64, expected - received)?;
             received += buffer.len() as u64;
             buffers.push(buffer);
@@ -277,15 +291,14 @@ impl Accessor for OpenDalAccessor {
 
     async fn open_sequential(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
         let path = request.object.locator();
-        if self.operator.info().scheme() == "http"
-            && request.content_length.is_none()
+        if request.content_length.is_none()
             && (request.options.io_chunk_size.is_some() || request.options.io_concurrency.get() > 1)
             && !self
                 .content_lengths
                 .as_ref()
                 .is_some_and(|lengths| lengths.contains_key(path))
         {
-            return self.open_chunked_http(request).await;
+            return self.open_chunked(request).await;
         }
         if request.content_length.is_some()
             || request.options.io_chunk_size.is_some()
