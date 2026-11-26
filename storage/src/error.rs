@@ -114,3 +114,10 @@ pub(crate) fn invalid_listing_prefix() -> Error {
         "expected an empty root prefix",
     )
 }
+
+pub(crate) fn invalid_response() -> opendal::Error {
+    opendal::Error::new(
+        opendal::ErrorKind::Unexpected,
+        "invalid bootstrap Content-Range",
+    )
+}

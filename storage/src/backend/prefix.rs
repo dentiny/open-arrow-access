@@ -4,6 +4,7 @@
 //! Adding the range at the transport boundary lets us validate against the
 //! response's whole-object length instead, without bypassing operator policies.
 
+use crate::error::invalid_response;
 use http::{Method, Request, Response, StatusCode, header};
 use opendal::{
     Buffer, HttpBody, HttpTransport, HttpTransporter, OperationContext,
@@ -76,11 +77,4 @@ impl HttpTransport for PrefixTransport {
         }
         Ok(response)
     }
-}
-
-fn invalid_response() -> opendal::Error {
-    opendal::Error::new(
-        opendal::ErrorKind::Unexpected,
-        "invalid bootstrap Content-Range",
-    )
 }
