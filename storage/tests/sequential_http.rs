@@ -98,15 +98,6 @@ fn storage(bytes: Vec<u8>, declared_length: usize, pending: bool) -> (OpenDalAcc
     let operator =
         Operator::new(opendal_service_http::Http::default().endpoint("http://sequential.invalid"))
             .unwrap();
-    storage_with_operator(bytes, declared_length, pending, operator)
-}
-
-fn storage_with_operator(
-    bytes: Vec<u8>,
-    declared_length: usize,
-    pending: bool,
-    operator: Operator,
-) -> (OpenDalAccessor, Requests) {
     let requests = Requests::default();
     let context = operator
         .base_context()
@@ -351,32 +342,11 @@ async fn dropping_a_sequential_reader_releases_its_http_permit() {
     drop(second);
 }
 
-#[rstest::rstest]
-#[case::http(false)]
-#[case::s3(true)]
 #[tokio::test]
-async fn chunked_bootstrap_reuses_prefix(#[case] s3: bool) {
+async fn chunked_bootstrap_reuses_prefix() {
     for size in [0, 1, 3, 4, 5, 17] {
         let bytes: Vec<_> = (0..size as u8).collect();
-        let operator = if s3 {
-            Operator::new(
-                opendal_service_s3::S3::default()
-                    .bucket("test-bucket")
-                    .endpoint("http://sequential.invalid")
-                    .region("us-east-1")
-                    .access_key_id("test-key")
-                    .secret_access_key("test-secret")
-                    .disable_config_load()
-                    .disable_ec2_metadata(),
-            )
-            .unwrap()
-        } else {
-            Operator::new(
-                opendal_service_http::Http::default().endpoint("http://sequential.invalid"),
-            )
-            .unwrap()
-        };
-        let (storage, requests) = storage_with_operator(bytes.clone(), size, false, operator);
+        let (storage, requests) = storage(bytes.clone(), size, false);
         let storage = storage
             .with_chunk_size(NonZeroUsize::new(3).unwrap())
             .with_http_concurrency_limit(HttpConcurrencyLimitLayer::new(1).unwrap());

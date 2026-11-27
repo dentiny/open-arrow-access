@@ -3183,7 +3183,6 @@ dependencies = [
  "opendal",
  "opendal-layer-observe-metrics-common",
  "opendal-service-http",
- "opendal-service-s3",
  "rstest",
  "tempfile",
  "tokio",
