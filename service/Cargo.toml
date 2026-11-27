@@ -39,8 +39,9 @@ courtlistener = [
     "tokio/sync",
 ]
 dataverse = []
-default = []
+default = ["duckdb-bundled"]
 doab = ["oai"]
+duckdb-bundled = ["duckdb/bundled"]
 federal-register = []
 figshare = []
 govinfo = []
