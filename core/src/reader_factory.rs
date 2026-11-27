@@ -91,6 +91,16 @@ pub trait ReaderFactoryExt: ReaderFactory {
     ) -> Result<Box<Self::Reader>>
     where
         for<'a> ByteReadRequest: From<&'a Self::Request>;
+
+    /// Prepare and decode a sequential storage input, preserving its I/O options.
+    /// Use only when the decoder does not require random access to the input.
+    async fn open_sequential_reader(
+        &self,
+        storage: &dyn Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
+        request: Self::Request,
+    ) -> Result<Box<Self::Reader>>
+    where
+        for<'a> ByteReadRequest: From<&'a Self::Request>;
 }
 
 #[async_trait]
@@ -116,14 +126,43 @@ impl<F: ReaderFactory + ?Sized> ReaderFactoryExt for F {
     where
         for<'a> ByteReadRequest: From<&'a Self::Request>,
     {
-        let byte_request = self.byte_request(&request);
-        let object = byte_request.object.clone();
-        let context = |error: crate::Error| error.with_object(Some(&object));
-        let prepared = self.prepare(&request).map_err(context)?;
-        let input = storage.open(byte_request).await.map_err(context)?;
-        let token = FactoryToken { _private: () };
-        self.create_reader(&token, input, request, prepared)
-            .await
-            .map_err(context)
+        open_reader(self, storage, request, false).await
     }
+
+    async fn open_sequential_reader(
+        &self,
+        storage: &dyn Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
+        request: Self::Request,
+    ) -> Result<Box<Self::Reader>>
+    where
+        for<'a> ByteReadRequest: From<&'a Self::Request>,
+    {
+        open_reader(self, storage, request, true).await
+    }
+}
+
+async fn open_reader<F: ReaderFactory + ?Sized>(
+    factory: &F,
+    storage: &dyn Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
+    request: F::Request,
+    sequential: bool,
+) -> Result<Box<F::Reader>>
+where
+    for<'a> ByteReadRequest: From<&'a F::Request>,
+{
+    let byte_request = factory.byte_request(&request);
+    let object = byte_request.object.clone();
+    let context = |error: crate::Error| error.with_object(Some(&object));
+    let prepared = factory.prepare(&request).map_err(context)?;
+    let input = if sequential {
+        storage.open_sequential(byte_request).await
+    } else {
+        storage.open(byte_request).await
+    }
+    .map_err(context)?;
+    let token = FactoryToken { _private: () };
+    factory
+        .create_reader(&token, input, request, prepared)
+        .await
+        .map_err(context)
 }

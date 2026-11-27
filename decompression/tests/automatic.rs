@@ -112,12 +112,19 @@ async fn disabled_codec_is_rejected_before_storage_opens() {
         }
         let error = Compression::from_path(name).unwrap_err();
         assert_eq!(error.kind(), ErrorKind::Unsupported);
-        let input = MemoryAccessor::new(b"anything", 1);
-        let observations = input.observations.clone();
-        let accessor = input.layer(AutoDecompressionLayer::new());
-        let error = accessor.open(name.into()).await.err().unwrap();
-        assert_eq!(error.kind(), ErrorKind::Unsupported);
-        assert!(observations.requests.lock().unwrap().is_empty());
+        for sequential in [false, true] {
+            let input = MemoryAccessor::new(b"anything", 1);
+            let observations = input.observations.clone();
+            let accessor = input.layer(AutoDecompressionLayer::new());
+            let result = if sequential {
+                accessor.open_sequential(name.into()).await
+            } else {
+                accessor.open(name.into()).await
+            };
+            let error = result.err().unwrap();
+            assert_eq!(error.kind(), ErrorKind::Unsupported);
+            assert!(observations.requests.lock().unwrap().is_empty());
+        }
     }
 }
 
