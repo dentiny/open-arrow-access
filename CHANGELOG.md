@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.22.1 - 2026-11-27
+
+- Preserve sequential storage opens through automatic decompression for both plain and compressed objects, avoiding redundant HEAD requests on the tested HTTP backend.
+- Preserve caller chunking and concurrency options; ordinary opens retain random-access behavior.
+- Release all eight public workspace crates at 0.22.1 with aligned internal dependency requirements.
+
 ## 0.22.0 - 2026-11-26
 
 - Bound concurrent Gutenberg file reads and release source buffers as files complete.
