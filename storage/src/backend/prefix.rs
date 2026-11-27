@@ -6,52 +6,81 @@
 use crate::validation::{self, HttpPrefixResponse};
 use http::{Method, Request, Response, StatusCode, header};
 use opendal::{
-    Buffer, HttpBody, HttpTransport, HttpTransporter, OperationContext,
-    raw::{Layer, OpRead, RpRead, Service, Servicer, normalize_path, oio},
+    Buffer, HttpBody, HttpTransport, HttpTransporter, Metadata, OperationContext, Operator,
+    raw::{Layer, OpRead, Service, Servicer, normalize_path, oio},
 };
 
-/// Use the layered service so retries, timeouts, and transport admission remain
-/// active. The caller uses response metadata to accept a whole object shorter
-/// than the requested range without triggering OpenDAL's exact-size EOF check.
-pub(super) async fn open(
-    operator: &opendal::Operator,
-    path: &str,
-    size: usize,
-) -> opendal::Result<(RpRead, Box<dyn oio::ReadStreamDyn>)> {
-    use oio::Read as _;
-
-    let path = normalize_path(path);
-    validation::validate_read_path(&path)?;
-    let reader = operator
-        .service()
-        .read(operator.context(), &path, OpRead::default())?;
-    reader.open((0..size as u64).into()).await
+/// Owns a bootstrap response until its prefix is consumed or dropped.
+/// Native range I/O preserves the operator's policies and backend signing.
+pub(super) struct PrefixReader {
+    metadata: Metadata,
+    stream: Box<dyn oio::ReadStreamDyn>,
+    size: u64,
 }
 
-/// Collect one bounded prefix. Short service streams cannot be polled to EOF:
-/// OpenDAL would enforce the original, larger requested range there.
-pub(super) async fn read(
-    stream: &mut impl oio::ReadStream,
-    expected: u64,
-    drain_to_eof: bool,
-) -> opendal::Result<Buffer> {
-    let mut buffers = Vec::new();
-    let mut received = 0;
-    while drain_to_eof || received < expected {
-        let buffer = stream.read().await?;
-        if buffer.is_empty() {
-            break;
-        }
-        validation::validate_prefix_chunk_length(buffer.len() as u64, expected - received)?;
-        received += buffer.len() as u64;
-        buffers.push(buffer);
+impl PrefixReader {
+    /// None means the backend needs the known-length fallback: either it rejects
+    /// an oversized prefix or does not return metadata while opening a range.
+    pub(super) async fn open(
+        operator: Operator,
+        path: &str,
+        size: usize,
+    ) -> opendal::Result<Option<Self>> {
+        use oio::Read as _;
+
+        let operator = operator.layer(HttpPrefixValidationLayer(size));
+        let path = normalize_path(path);
+        validation::validate_read_path(&path)?;
+        let reader = operator
+            .service()
+            .read(operator.context(), &path, OpRead::default())?;
+        let (response, stream) = match reader.open((0..size as u64).into()).await {
+            Ok(response) => response,
+            Err(error) if error.kind() == opendal::ErrorKind::RangeNotSatisfied => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        Ok(response.into_metadata().map(|metadata| Self {
+            metadata,
+            stream,
+            size: size as u64,
+        }))
     }
-    validation::validate_prefix_read_length(received, expected)?;
-    Ok(buffers.into_iter().flatten().collect())
+
+    pub(super) fn metadata(&self) -> &Metadata {
+        &self.metadata
+    }
+
+    /// Consuming self releases the response before subsequent ranges are opened.
+    pub(super) async fn read(mut self) -> opendal::Result<Buffer> {
+        let expected = self.metadata.content_length().min(self.size);
+        Self::collect(&mut self.stream, expected, expected == self.size).await
+    }
+
+    // Short service streams cannot be polled to EOF: OpenDAL would enforce the
+    // original, larger requested range there. HTTP bodies can always be drained.
+    async fn collect(
+        stream: &mut impl oio::ReadStream,
+        expected: u64,
+        drain_to_eof: bool,
+    ) -> opendal::Result<Buffer> {
+        let mut buffers = Vec::new();
+        let mut received = 0;
+        while drain_to_eof || received < expected {
+            let buffer = stream.read().await?;
+            if buffer.is_empty() {
+                break;
+            }
+            validation::validate_prefix_chunk_length(buffer.len() as u64, expected - received)?;
+            received += buffer.len() as u64;
+            buffers.push(buffer);
+        }
+        validation::validate_prefix_read_length(received, expected)?;
+        Ok(buffers.into_iter().flatten().collect())
+    }
 }
 
 #[derive(Debug)]
-pub(super) struct HttpPrefixValidationLayer(pub usize);
+struct HttpPrefixValidationLayer(usize);
 
 impl Layer for HttpPrefixValidationLayer {
     fn apply_context(&self, _: Servicer, context: OperationContext) -> OperationContext {
@@ -101,7 +130,7 @@ impl HttpTransport for PrefixTransport {
             // short object: CompleteReader would reject its legal short range.
             // Drain and validate here, before that wrapper, retaining at most
             // the requested prefix and releasing transport permits normally.
-            let buffer = read(response.body_mut(), length, true).await?;
+            let buffer = PrefixReader::collect(response.body_mut(), length, true).await?;
             *response.body_mut() = HttpBody::new(
                 futures::stream::once(std::future::ready(Ok(buffer))),
                 Some(length),
