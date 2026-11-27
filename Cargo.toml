@@ -94,6 +94,7 @@ blocking = ["dep:arrow-array", "dep:tokio"]
 crawl = [
     "layer-parallel-read",
     "layer-unordered-emission",
+    "layer-whole-object",
     "layer-coalesce-batches",
     "layer-prefetch",
 ]
@@ -127,6 +128,7 @@ layer-schema-evolution = ["open-arrow-access-layers/schema-evolution"]
 layer-source-columns = ["open-arrow-access-layers/source-columns"]
 layer-source-positions = ["open-arrow-access-layers/source-positions"]
 layer-unordered-emission = ["open-arrow-access-layers/unordered-emission"]
+layer-whole-object = ["open-arrow-access-layers/whole-object"]
 layers-all = [
     "layer-attachment-fallback",
     "layer-coalesce-batches",
@@ -141,6 +143,7 @@ layers-all = [
     "layer-source-columns",
     "layer-source-positions",
     "layer-unordered-emission",
+    "layer-whole-object",
 ]
 service-arxiv = ["open-arrow-access-service/arxiv"]
 service-bhl = ["open-arrow-access-service/bhl"]

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add an opt-in `WholeObjectLayer` for sequential whole-object consumers: ignore inherited I/O chunk sizes at concurrency one, including opens beneath decompression, while preserving explicit parallel I/O options.
+
 ## 0.22.0 - 2026-11-26
 
 - Bound concurrent Gutenberg file reads and release source buffers as files complete.

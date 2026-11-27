@@ -92,3 +92,8 @@ pub use missing_object::{MissingObjectAccessor, MissingObjectLayer, MissingObjec
 mod attachment_fallback;
 #[cfg(feature = "attachment-fallback")]
 pub use attachment_fallback::{AttachmentFallbackAccessor, AttachmentFallbackLayer};
+
+#[cfg(feature = "whole-object")]
+mod whole_object;
+#[cfg(feature = "whole-object")]
+pub use whole_object::{WholeObjectAccessor, WholeObjectLayer};

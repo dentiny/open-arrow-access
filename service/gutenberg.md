@@ -29,6 +29,28 @@ should support other formats. No alternate representation is silently discarded.
 Sources: [published formats](https://www.gutenberg.org/help/file_formats.html)
 and [download options](https://www.gutenberg.org/help/bibliographic_record.html).
 
+## Whole-object byte reads
+
+When an application propagates global byte chunk options, enable
+`layer-whole-object` on the facade (or `whole-object` on the layers crate).
+Apply `WholeObjectLayer` to raw RDF storage **before** `AutoDecompressionLayer`,
+and to payload storage before `GutenbergMirror` or `GutenbergBookDecoder`:
+
+```rust,ignore
+let rdf = rdf_storage
+    .layer(WholeObjectLayer)
+    .layer(AutoDecompressionLayer::new());
+let files = GutenbergMirror::new(file_storage.layer(WholeObjectLayer), mirror_prefix);
+let books = GutenbergBooks::new(rdf, GutenbergBookDecoder::new(files));
+```
+
+For direct HTTP payloads, apply the same layer to the connection passed to
+`GutenbergBookDecoder`. With byte I/O concurrency one, the layer removes the
+inherited splitting size at each final storage open. This lets backends use a
+single streaming response instead of chunked range requests or sizing probes.
+Explicit parallel byte I/O retains its options; backend metadata fallbacks may
+still probe. Book/file concurrency is independent of byte I/O concurrency.
+
 ## File hierarchy
 
 The main and generated collections are separate rsync modules. A mirror can

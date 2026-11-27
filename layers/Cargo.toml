@@ -21,7 +21,9 @@ all = [
     "source-columns",
     "source-positions",
     "unordered-emission",
+    "whole-object",
 ]
+whole-object = []
 attachment-fallback = []
 coalesce-batches = ["dep:arrow-select"]
 default = []
@@ -65,6 +67,11 @@ open-arrow-access-core.workspace = true
 tokio = { workspace = true, optional = true, features = ["sync"] }
 
 [dev-dependencies]
+http.workspace = true
+opendal.workspace = true
+opendal-service-http.workspace = true
+open-arrow-access-storage.workspace = true
+open-arrow-access-decompression = { workspace = true, features = ["gzip"] }
 more-asserts.workspace = true
 open-arrow-access-file-format = { path = "../file-format", default-features = false, features = [
     "csv",
@@ -115,3 +122,7 @@ required-features = ["source-columns"]
 [[test]]
 name = "source_positions"
 required-features = ["source-positions"]
+
+[[test]]
+name = "whole_object"
+required-features = ["whole-object"]
