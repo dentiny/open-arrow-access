@@ -3000,7 +3000,7 @@ checksum = "269bca4c2591a28585d6bf10d9ed0332b7d76900a1b02bec41bdc3a2cdcda107"
 
 [[package]]
 name = "open-arrow-access"
-version = "0.21.10"
+version = "0.22.0"
 dependencies = [
  "arrow-array",
  "arrow-schema",
@@ -3020,7 +3020,7 @@ dependencies = [
 
 [[package]]
 name = "open-arrow-access-core"
-version = "0.21.10"
+version = "0.22.0"
 dependencies = [
  "arrow-array",
  "arrow-schema",
@@ -3037,7 +3037,7 @@ dependencies = [
 
 [[package]]
 name = "open-arrow-access-dataset"
-version = "0.21.10"
+version = "0.22.0"
 dependencies = [
  "arrow-array",
  "arrow-schema",
@@ -3060,7 +3060,7 @@ dependencies = [
 
 [[package]]
 name = "open-arrow-access-decompression"
-version = "0.21.10"
+version = "0.22.0"
 dependencies = [
  "astral-tokio-tar",
  "async-compression",
@@ -3077,7 +3077,7 @@ dependencies = [
 
 [[package]]
 name = "open-arrow-access-file-format"
-version = "0.21.10"
+version = "0.22.0"
 dependencies = [
  "arrow-array",
  "arrow-csv",
@@ -3109,7 +3109,7 @@ dependencies = [
 
 [[package]]
 name = "open-arrow-access-layers"
-version = "0.21.10"
+version = "0.22.0"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -3130,7 +3130,7 @@ dependencies = [
 
 [[package]]
 name = "open-arrow-access-service"
-version = "0.21.10"
+version = "0.22.0"
 dependencies = [
  "arrow-array",
  "arrow-cast",
@@ -3171,7 +3171,7 @@ dependencies = [
 
 [[package]]
 name = "open-arrow-access-storage"
-version = "0.21.10"
+version = "0.22.0"
 dependencies = [
  "futures",
  "http",
@@ -3190,7 +3190,7 @@ dependencies = [
 
 [[package]]
 name = "open-arrow-access-test-support"
-version = "0.21.10"
+version = "0.22.0"
 dependencies = [
  "arrow-array",
  "futures",
