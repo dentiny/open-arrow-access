@@ -175,54 +175,20 @@ impl OpenDalAccessor {
             .options
             .io_chunk_size
             .map_or(DEFAULT_IO_CHUNK_SIZE, |size| size.get());
-        let operator = self
-            .operator()
-            .layer(prefix::HttpPrefixValidationLayer(size));
-        let (response, mut stream) = match prefix::open(&operator, path, size).await {
-            Ok(response) => response,
-            // Some backends require the requested range to fit the object
-            // exactly. Discover its length before retrying a smaller range.
-            Err(error) if error.kind() == opendal::ErrorKind::RangeNotSatisfied => {
-                return self.open(request).await;
-            }
-            Err(error) => return Err(map_error("open", path, error)),
-        };
-        let Some(metadata) = response.metadata() else {
-            // Not every backend returns whole-object metadata while opening a
-            // range. Release the stream before the known-length fallback.
-            drop(stream);
+        let Some(prefix) = prefix::PrefixReader::open(self.operator(), path, size)
+            .await
+            .map_err(|e| map_error("open", path, e))?
+        else {
             return self.open(request).await;
         };
-        crate::validation::validate_regular_file(metadata.is_file())?;
-        let len = metadata.content_length();
-        let expected = len.min(size as u64);
-        let mut buffers = Vec::new();
-        let mut received = 0;
-        loop {
-            // A bounded OpenDAL stream enforces the requested size at EOF.
-            // For a whole object shorter than that range, metadata supplies the
-            // actual size. HTTP validation has already drained such a body.
-            if expected < size as u64 && received == expected {
-                break;
-            }
-            let buffer = stream
-                .read_dyn()
-                .await
-                .map_err(|e| map_error("read", path, e))?;
-            if buffer.is_empty() {
-                break;
-            }
-            crate::validation::validate_chunk_length(buffer.len() as u64, expected - received)?;
-            received += buffer.len() as u64;
-            buffers.push(buffer);
-        }
-        crate::validation::validate_read_length(received, expected, "open")?;
-        // Complete the bootstrap body before any remaining range can need a
-        // permit, including when the shared HTTP limit is one.
-        drop(stream);
-        let prefix: opendal::Buffer = buffers.into_iter().flatten().collect();
-        let bytes = prefix.to_bytes();
-        let content = ReadContent::new(len).with_prefetched(0..received, bytes)?;
+        crate::validation::validate_regular_file(prefix.metadata().is_file())?;
+        let len = prefix.metadata().content_length();
+        let bytes = prefix
+            .read()
+            .await
+            .map_err(|e| map_error("read", path, e))?
+            .to_bytes();
+        let content = ReadContent::new(len).with_prefetched(0..bytes.len() as u64, bytes)?;
         self.open_ranged(request.object, request.options, content)
             .await
     }
@@ -263,8 +229,10 @@ impl OpenDalAccessor {
             .into_stream(start..length)
             .await
             .map_err(|error| map_error("read", path, error))?;
-        let sequential =
-            SequentialReader::with_prefix(stream, object, length, self.chunk_size, prefix);
+        let mut sequential = SequentialReader::new(stream, object, length, self.chunk_size);
+        if let Some(prefix) = prefix {
+            sequential = sequential.with_prefix(prefix);
+        }
         let mut reader = RangedReader::new(inner, sequential);
         if let Some(prefetched) = prefetched {
             reader = reader.with_prefetched(prefetched);
@@ -295,24 +263,16 @@ impl Accessor for OpenDalAccessor {
 
     async fn open_sequential(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
         let path = request.object.locator();
-        if request.content_length.is_none()
-            && (request.options.io_chunk_size.is_some() || request.options.io_concurrency.get() > 1)
-            && !self
-                .content_lengths
-                .as_ref()
-                .is_some_and(|lengths| lengths.contains_key(path))
-        {
-            return self.open_chunked(request).await;
-        }
         if request.content_length.is_some()
-            || request.options.io_chunk_size.is_some()
-            || request.options.io_concurrency.get() > 1
             || self
                 .content_lengths
                 .as_ref()
                 .is_some_and(|lengths| lengths.contains_key(path))
         {
             return self.open(request).await;
+        }
+        if request.options.io_chunk_size.is_some() || request.options.io_concurrency.get() > 1 {
+            return self.open_chunked(request).await;
         }
         let reader = self
             .operator()

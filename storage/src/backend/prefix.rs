@@ -3,47 +3,92 @@
 //! The backend receives the range before constructing or signing its request.
 //! HTTP response validation is separate from backend-independent range I/O.
 
-use crate::error::invalid_response;
+use crate::validation::{self, HttpPrefixResponse};
 use http::{Method, Request, Response, StatusCode, header};
 use opendal::{
-    Buffer, HttpBody, HttpTransport, HttpTransporter, OperationContext,
-    raw::{
-        Layer, OpRead, RpRead, Service, Servicer, normalize_path, oio, parse_content_range,
-        validate_path,
-    },
+    Buffer, HttpBody, HttpTransport, HttpTransporter, Metadata, OperationContext, Operator,
+    raw::{Layer, OpRead, Service, Servicer, normalize_path, oio},
 };
 
-/// Use the layered service so retries, timeouts, and transport admission remain
-/// active. The caller uses response metadata to accept a whole object shorter
-/// than the requested range without triggering OpenDAL's exact-size EOF check.
-pub(super) async fn open(
-    operator: &opendal::Operator,
-    path: &str,
-    size: usize,
-) -> opendal::Result<(RpRead, Box<dyn oio::ReadStreamDyn>)> {
-    use oio::Read as _;
+/// Owns a bootstrap response until its prefix is consumed or dropped.
+/// Native range I/O preserves the operator's policies and backend signing.
+pub(super) struct PrefixReader {
+    metadata: Metadata,
+    stream: Box<dyn oio::ReadStreamDyn>,
+    /// Maximum bytes requested by the bootstrap range. The whole-object length
+    /// lives in metadata; a smaller object returns fewer than requested_size bytes.
+    requested_size: u64,
+}
 
-    let path = normalize_path(path);
-    if !validate_path(&path, opendal::EntryMode::FILE) {
-        return Err(opendal::Error::new(
-            opendal::ErrorKind::IsADirectory,
-            "read path is a directory",
-        ));
+impl PrefixReader {
+    /// None means the backend needs the known-length fallback: either it rejects
+    /// an oversized prefix or does not return metadata while opening a range.
+    pub(super) async fn open(
+        operator: Operator,
+        path: &str,
+        requested_size: usize,
+    ) -> opendal::Result<Option<Self>> {
+        use oio::Read as _;
+
+        let operator = operator.layer(HttpPrefixValidationLayer(requested_size));
+        let path = normalize_path(path);
+        validation::validate_read_path(&path)?;
+        let reader = operator
+            .service()
+            .read(operator.context(), &path, OpRead::default())?;
+        let (response, stream) = match reader.open((0..requested_size as u64).into()).await {
+            Ok(response) => response,
+            Err(error) if error.kind() == opendal::ErrorKind::RangeNotSatisfied => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        Ok(response.into_metadata().map(|metadata| Self {
+            metadata,
+            stream,
+            requested_size: requested_size as u64,
+        }))
     }
-    let reader = operator
-        .service()
-        .read(operator.context(), &path, OpRead::default())?;
-    reader.open((0..size as u64).into()).await
+
+    pub(super) fn metadata(&self) -> &Metadata {
+        &self.metadata
+    }
+
+    /// Consuming self releases the response before subsequent ranges are opened.
+    pub(super) async fn read(mut self) -> opendal::Result<Buffer> {
+        let expected = self.metadata.content_length().min(self.requested_size);
+        Self::collect(&mut self.stream, expected, expected == self.requested_size).await
+    }
+
+    // Short service streams cannot be polled to EOF: OpenDAL would enforce the
+    // original, larger requested range there. HTTP bodies can always be drained.
+    async fn collect(
+        stream: &mut impl oio::ReadStream,
+        expected: u64,
+        drain_to_eof: bool,
+    ) -> opendal::Result<Buffer> {
+        let mut buffers = Vec::new();
+        let mut received = 0;
+        while drain_to_eof || received < expected {
+            let buffer = stream.read().await?;
+            if buffer.is_empty() {
+                break;
+            }
+            validation::validate_prefix_chunk_length(buffer.len() as u64, expected - received)?;
+            received += buffer.len() as u64;
+            buffers.push(buffer);
+        }
+        validation::validate_prefix_read_length(received, expected)?;
+        Ok(buffers.into_iter().flatten().collect())
+    }
 }
 
 #[derive(Debug)]
-pub(super) struct HttpPrefixValidationLayer(pub usize);
+struct HttpPrefixValidationLayer(usize);
 
 impl Layer for HttpPrefixValidationLayer {
     fn apply_context(&self, _: Servicer, context: OperationContext) -> OperationContext {
         let transport = HttpTransporter::new(PrefixTransport {
             inner: context.http_transport().clone(),
-            size: self.0 as u64,
+            requested_size: self.0 as u64,
         });
         context.with_http_transport(transport)
     }
@@ -51,14 +96,14 @@ impl Layer for HttpPrefixValidationLayer {
 
 struct PrefixTransport {
     inner: HttpTransporter,
-    size: u64,
+    requested_size: u64,
 }
 
 impl HttpTransport for PrefixTransport {
     async fn fetch(&self, request: Request<Buffer>) -> opendal::Result<Response<HttpBody>> {
         // Only inspect the prefix operation. Authentication and other auxiliary
         // requests, as well as non-HTTP backends, retain their own behavior.
-        let expected_range = format!("bytes=0-{}", self.size - 1);
+        let expected_range = format!("bytes=0-{}", self.requested_size - 1);
         if request.method() != Method::GET
             || !request
                 .headers()
@@ -68,14 +113,13 @@ impl HttpTransport for PrefixTransport {
             return self.inner.fetch(request).await;
         }
         let mut response = self.inner.fetch(request).await?;
-        if response.status() == StatusCode::RANGE_NOT_SATISFIABLE
-            && response
-                .headers()
-                .get(header::CONTENT_RANGE)
-                .is_some_and(|value| value == "bytes */0")
-        {
-            // Only an explicit zero total proves an empty object. Drain the
-            // error response before replacing it so its HTTP permit is released.
+        let response_kind = validation::validate_http_prefix_response(
+            response.status(),
+            response.headers(),
+            self.requested_size,
+        )?;
+        if matches!(response_kind, HttpPrefixResponse::Empty) {
+            // Drain before replacing the response to release its HTTP permit.
             response.body_mut().to_buffer().await?;
             return Ok(Response::builder()
                 .status(StatusCode::OK)
@@ -83,51 +127,12 @@ impl HttpTransport for PrefixTransport {
                 .body(HttpBody::new(futures::stream::empty(), Some(0)))
                 .unwrap());
         }
-        let mut short_length = None;
-        if response.status() == StatusCode::PARTIAL_CONTENT {
-            let range = parse_content_range(response.headers())?.ok_or_else(invalid_response)?;
-            let len = range.size().ok_or_else(invalid_response)?;
-            if range.range() != Some(0..len.min(self.size)) {
-                return Err(invalid_response());
-            }
-            if len < self.size {
-                short_length = Some(len);
-            }
-        } else if response.status() == StatusCode::OK {
-            // A server ignoring Range is usable only if its entire body fits
-            // the requested prefix. Never turn a bootstrap into a full download.
-            let length = opendal::raw::parse_content_length(response.headers())?;
-            if !length.is_some_and(|length| length <= self.size) {
-                return Err(opendal::Error::new(
-                    opendal::ErrorKind::Unsupported,
-                    "HTTP server ignored the bootstrap byte range",
-                ));
-            }
-            short_length = length.filter(|length| *length < self.size);
-        }
-        if let Some(length) = short_length {
+        if let HttpPrefixResponse::Short(length) = response_kind {
             // The caller cannot poll the bounded service stream to EOF for a
             // short object: CompleteReader would reject its legal short range.
             // Drain and validate here, before that wrapper, retaining at most
             // the requested prefix and releasing transport permits normally.
-            use opendal::raw::oio::ReadStream as _;
-            let mut buffers = Vec::new();
-            let mut received = 0;
-            loop {
-                let buffer = response.body_mut().read().await?;
-                if buffer.is_empty() {
-                    break;
-                }
-                if buffer.len() as u64 > length - received {
-                    return Err(invalid_response());
-                }
-                received += buffer.len() as u64;
-                buffers.push(buffer);
-            }
-            if received != length {
-                return Err(invalid_response());
-            }
-            let buffer: Buffer = buffers.into_iter().flatten().collect();
+            let buffer = PrefixReader::collect(response.body_mut(), length, true).await?;
             *response.body_mut() = HttpBody::new(
                 futures::stream::once(std::future::ready(Ok(buffer))),
                 Some(length),
