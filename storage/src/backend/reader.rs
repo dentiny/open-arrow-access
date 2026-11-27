@@ -250,19 +250,12 @@ impl SequentialReader {
         }
     }
 
-    pub(super) fn with_prefix(
-        stream: opendal::BufferStream,
-        object: ObjectRef,
-        len: u64,
-        chunk_size: NonZeroUsize,
-        prefix: Option<opendal::Buffer>,
-    ) -> Self {
-        let mut reader = Self::new(stream, object, len, chunk_size);
-        if let Some(prefix) = prefix {
-            let input = reader.input.as_mut().expect("new reader owns its input");
-            input.pending = prefix;
-        }
-        reader
+    pub(super) fn with_prefix(mut self, prefix: opendal::Buffer) -> Self {
+        self.input
+            .as_mut()
+            .expect("new reader owns its input")
+            .pending = prefix;
+        self
     }
 
     fn length(&self) -> u64 {

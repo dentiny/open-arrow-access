@@ -28,6 +28,28 @@ pub(super) async fn open(
     reader.open((0..size as u64).into()).await
 }
 
+/// Collect one bounded prefix. Short service streams cannot be polled to EOF:
+/// OpenDAL would enforce the original, larger requested range there.
+pub(super) async fn read(
+    stream: &mut impl oio::ReadStream,
+    expected: u64,
+    drain_to_eof: bool,
+) -> opendal::Result<Buffer> {
+    let mut buffers = Vec::new();
+    let mut received = 0;
+    while drain_to_eof || received < expected {
+        let buffer = stream.read().await?;
+        if buffer.is_empty() {
+            break;
+        }
+        validation::validate_prefix_chunk_length(buffer.len() as u64, expected - received)?;
+        received += buffer.len() as u64;
+        buffers.push(buffer);
+    }
+    validation::validate_prefix_read_length(received, expected)?;
+    Ok(buffers.into_iter().flatten().collect())
+}
+
 #[derive(Debug)]
 pub(super) struct HttpPrefixValidationLayer(pub usize);
 
@@ -79,20 +101,7 @@ impl HttpTransport for PrefixTransport {
             // short object: CompleteReader would reject its legal short range.
             // Drain and validate here, before that wrapper, retaining at most
             // the requested prefix and releasing transport permits normally.
-            use opendal::raw::oio::ReadStream as _;
-            let mut buffers = Vec::new();
-            let mut received = 0;
-            loop {
-                let buffer = response.body_mut().read().await?;
-                if buffer.is_empty() {
-                    break;
-                }
-                validation::validate_prefix_chunk_length(buffer.len() as u64, length - received)?;
-                received += buffer.len() as u64;
-                buffers.push(buffer);
-            }
-            validation::validate_prefix_read_length(received, length)?;
-            let buffer: Buffer = buffers.into_iter().flatten().collect();
+            let buffer = read(response.body_mut(), length, true).await?;
             *response.body_mut() = HttpBody::new(
                 futures::stream::once(std::future::ready(Ok(buffer))),
                 Some(length),
