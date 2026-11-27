@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.22.0 - 2026-11-26
+
+- Bound concurrent Gutenberg file reads and release source buffers as files complete.
+- Resolve Gutenberg UTF-8 text mirror aliases on NotFound while preserving advertised file metadata.
+- Bootstrap Parquet metadata with a cached suffix GET and reuse known file lengths for partitions to avoid redundant requests.
+- Reuse the initial prefix read when bootstrapping chunked sequential reads.
+- Release all eight public workspace crates at 0.22.0 with aligned internal dependency requirements.
+
 ## 0.21.10 - 2026-11-25
 
 - Add `GutenbergMirror` to route advertised Gutenberg file URLs through caller-configured byte storage while preserving original metadata and sequential-open behavior.
