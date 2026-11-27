@@ -15,7 +15,9 @@ use opendal::{
 pub(super) struct PrefixReader {
     metadata: Metadata,
     stream: Box<dyn oio::ReadStreamDyn>,
-    size: u64,
+    /// Maximum bytes requested by the bootstrap range. The whole-object length
+    /// lives in metadata; a smaller object returns fewer than requested_size bytes.
+    requested_size: u64,
 }
 
 impl PrefixReader {
@@ -24,17 +26,17 @@ impl PrefixReader {
     pub(super) async fn open(
         operator: Operator,
         path: &str,
-        size: usize,
+        requested_size: usize,
     ) -> opendal::Result<Option<Self>> {
         use oio::Read as _;
 
-        let operator = operator.layer(HttpPrefixValidationLayer(size));
+        let operator = operator.layer(HttpPrefixValidationLayer(requested_size));
         let path = normalize_path(path);
         validation::validate_read_path(&path)?;
         let reader = operator
             .service()
             .read(operator.context(), &path, OpRead::default())?;
-        let (response, stream) = match reader.open((0..size as u64).into()).await {
+        let (response, stream) = match reader.open((0..requested_size as u64).into()).await {
             Ok(response) => response,
             Err(error) if error.kind() == opendal::ErrorKind::RangeNotSatisfied => return Ok(None),
             Err(error) => return Err(error),
@@ -42,7 +44,7 @@ impl PrefixReader {
         Ok(response.into_metadata().map(|metadata| Self {
             metadata,
             stream,
-            size: size as u64,
+            requested_size: requested_size as u64,
         }))
     }
 
@@ -52,8 +54,8 @@ impl PrefixReader {
 
     /// Consuming self releases the response before subsequent ranges are opened.
     pub(super) async fn read(mut self) -> opendal::Result<Buffer> {
-        let expected = self.metadata.content_length().min(self.size);
-        Self::collect(&mut self.stream, expected, expected == self.size).await
+        let expected = self.metadata.content_length().min(self.requested_size);
+        Self::collect(&mut self.stream, expected, expected == self.requested_size).await
     }
 
     // Short service streams cannot be polled to EOF: OpenDAL would enforce the
@@ -86,7 +88,7 @@ impl Layer for HttpPrefixValidationLayer {
     fn apply_context(&self, _: Servicer, context: OperationContext) -> OperationContext {
         let transport = HttpTransporter::new(PrefixTransport {
             inner: context.http_transport().clone(),
-            size: self.0 as u64,
+            requested_size: self.0 as u64,
         });
         context.with_http_transport(transport)
     }
@@ -94,14 +96,14 @@ impl Layer for HttpPrefixValidationLayer {
 
 struct PrefixTransport {
     inner: HttpTransporter,
-    size: u64,
+    requested_size: u64,
 }
 
 impl HttpTransport for PrefixTransport {
     async fn fetch(&self, request: Request<Buffer>) -> opendal::Result<Response<HttpBody>> {
         // Only inspect the prefix operation. Authentication and other auxiliary
         // requests, as well as non-HTTP backends, retain their own behavior.
-        let expected_range = format!("bytes=0-{}", self.size - 1);
+        let expected_range = format!("bytes=0-{}", self.requested_size - 1);
         if request.method() != Method::GET
             || !request
                 .headers()
@@ -114,7 +116,7 @@ impl HttpTransport for PrefixTransport {
         let response_kind = validation::validate_http_prefix_response(
             response.status(),
             response.headers(),
-            self.size,
+            self.requested_size,
         )?;
         if matches!(response_kind, HttpPrefixResponse::Empty) {
             // Drain before replacing the response to release its HTTP permit.
