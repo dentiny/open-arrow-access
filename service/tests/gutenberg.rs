@@ -620,12 +620,13 @@ async fn mirror_resolves_utf8_alias_without_changing_bytes(
     let (_directory, operator) = temp_fs(&[(path.as_str(), payload)]);
     let mirror = GutenbergMirror::new(OpenDalAccessor::new(operator), "mirror/");
     let mut request = ByteReadRequest::new("https://www.gutenberg.org/ebooks/1225.txt.utf-8");
-    if known_length {
-        // Exercise lazy opens that skip stat and discover NotFound on next().
-        request.content_length = Some(payload.len() as u64);
-    }
     let metadata = mirror.metadata(request.clone()).await.unwrap();
     assert_eq!(metadata.source.unwrap().locator(), path);
+    if known_length {
+        // Exercise lazy opens that skip stat and discover NotFound on next().
+        // Metadata with a known-length hint need not check file existence.
+        request.content_length = Some(payload.len() as u64);
+    }
     let mut reader = if sequential {
         mirror.open_sequential(request).await.unwrap()
     } else {
