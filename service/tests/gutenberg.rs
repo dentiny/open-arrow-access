@@ -599,3 +599,132 @@ async fn mirror_preserves_sequential_open_and_metadata_overrides() {
         "cache/epub/42/pg42.txt"
     );
 }
+
+#[rstest::rstest]
+#[case("pg1225.txt", false)]
+#[case("pg1225.txt.utf8", false)]
+#[case("pg1225.txt.utf8", true)]
+#[tokio::test]
+async fn mirror_resolves_utf8_alias_without_changing_bytes(
+    #[case] member: &str,
+    #[case] known_length: bool,
+    #[values(false, true)] sequential: bool,
+) {
+    use open_arrow_access_core::{BytePosition, ByteReadRequest};
+    use open_arrow_access_service::gutenberg::GutenbergMirror;
+    use open_arrow_access_storage::OpenDalAccessor;
+    use open_arrow_access_test_support::temp_fs;
+
+    let path = format!("mirror/cache/epub/1225/{member}");
+    let payload = b"original UTF-8 bytes\n";
+    let (_directory, operator) = temp_fs(&[(path.as_str(), payload)]);
+    let mirror = GutenbergMirror::new(OpenDalAccessor::new(operator), "mirror/");
+    let mut request = ByteReadRequest::new("https://www.gutenberg.org/ebooks/1225.txt.utf-8");
+    if known_length {
+        // Exercise lazy opens that skip stat and discover NotFound on next().
+        request.content_length = Some(payload.len() as u64);
+    }
+    let metadata = mirror.metadata(request.clone()).await.unwrap();
+    assert_eq!(metadata.source.unwrap().locator(), path);
+    let mut reader = if sequential {
+        mirror.open_sequential(request).await.unwrap()
+    } else {
+        mirror.open(request).await.unwrap()
+    };
+    assert_eq!(reader.metadata().source.as_ref().unwrap().locator(), path);
+    assert_eq!(reader.position(), Some(BytePosition::Stored(0)));
+    assert_eq!(
+        reader.read_range(0..8).await.unwrap().as_ref(),
+        &payload[..8]
+    );
+    assert_eq!(reader.position(), Some(BytePosition::Stored(0)));
+    let mut bytes = Vec::new();
+    while let Some(chunk) = reader.next().await.unwrap() {
+        bytes.extend_from_slice(&chunk);
+    }
+    assert_eq!(bytes, payload);
+}
+
+#[tokio::test]
+async fn mirror_prefers_primary_utf8_alias_and_preserves_exact_missing_paths() {
+    use open_arrow_access_core::ByteReadRequest;
+    use open_arrow_access_service::gutenberg::GutenbergMirror;
+    use open_arrow_access_storage::OpenDalAccessor;
+    use open_arrow_access_test_support::temp_fs;
+
+    let (_directory, operator) = temp_fs(&[
+        ("cache/epub/42/pg42.txt", b"primary"),
+        ("cache/epub/42/pg42.txt.utf8", b"alternate"),
+        ("cache/epub/673/pg673.txt.utf8", b"alternate"),
+    ]);
+    let mirror = GutenbergMirror::new(OpenDalAccessor::new(operator), "");
+    let mut reader = mirror
+        .open(ByteReadRequest::new(
+            "https://www.gutenberg.org/ebooks/42.txt.utf-8",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(reader.next().await.unwrap().unwrap().as_ref(), b"primary");
+    for uri in [
+        "https://www.gutenberg.org/cache/epub/673/pg673.txt",
+        "https://www.gutenberg.org/ebooks/999.txt.utf-8",
+        "https://www.gutenberg.org/files/482/482-h.zip",
+    ] {
+        let error = match mirror.open(ByteReadRequest::new(uri)).await {
+            Ok(_) => panic!("missing advertised file must remain an error: {uri}"),
+            Err(error) => error,
+        };
+        assert_eq!(error.kind(), ErrorKind::NotFound);
+    }
+}
+
+#[rstest::rstest]
+#[case(ErrorKind::PermissionDenied)]
+#[case(ErrorKind::Unavailable)]
+#[tokio::test]
+async fn mirror_does_not_fallback_on_other_errors(#[case] kind: ErrorKind) {
+    use open_arrow_access_core::{
+        ByteReadRequest, ByteReader, Capability, Error, Result, async_trait,
+    };
+    use open_arrow_access_service::gutenberg::GutenbergMirror;
+    use std::sync::{Arc, Mutex};
+
+    struct Failing {
+        kind: ErrorKind,
+        paths: Arc<Mutex<Vec<String>>>,
+    }
+    #[async_trait]
+    impl Accessor for Failing {
+        type Request = ByteReadRequest;
+        type Reader = dyn ByteReader;
+        fn capability(&self) -> Capability {
+            Capability::default()
+        }
+        async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
+            self.paths
+                .lock()
+                .unwrap()
+                .push(request.object.locator().to_owned());
+            Err(Error::new(self.kind, "test", "primary failure"))
+        }
+    }
+    let paths = Arc::new(Mutex::new(Vec::new()));
+    let mirror = GutenbergMirror::new(
+        Failing {
+            kind,
+            paths: paths.clone(),
+        },
+        "",
+    );
+    let error = match mirror
+        .open(ByteReadRequest::new(
+            "https://www.gutenberg.org/ebooks/1225.txt.utf-8",
+        ))
+        .await
+    {
+        Ok(_) => panic!("primary failure must propagate"),
+        Err(error) => error,
+    };
+    assert_eq!(error.kind(), kind);
+    assert_eq!(*paths.lock().unwrap(), ["cache/epub/1225/pg1225.txt"]);
+}
