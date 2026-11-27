@@ -1,6 +1,6 @@
 use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, FactoryAccessor, ListRequest,
-    ObjectStream, ReaderFactory, Result, async_trait,
+    ObjectStream, ReaderFactory, ReaderFactoryExt, Result, async_trait,
 };
 
 use crate::DecompressionFactory;
@@ -43,6 +43,13 @@ where
 
     async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
         self.binding.open(request).await
+    }
+
+    async fn open_sequential(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
+        self.binding
+            .factory()
+            .open_sequential_reader(self.binding.storage(), request)
+            .await
     }
 }
 
