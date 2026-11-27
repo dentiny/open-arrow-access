@@ -95,10 +95,10 @@ impl HttpTransport for Server {
 }
 
 fn storage(bytes: Vec<u8>, declared_length: usize, pending: bool) -> (OpenDalAccessor, Requests) {
-    let requests = Requests::default();
     let operator =
         Operator::new(opendal_service_http::Http::default().endpoint("http://sequential.invalid"))
             .unwrap();
+    let requests = Requests::default();
     let context = operator
         .base_context()
         .with_http_transport(HttpTransporter::new(Server {
@@ -111,6 +111,13 @@ fn storage(bytes: Vec<u8>, declared_length: usize, pending: bool) -> (OpenDalAcc
         OpenDalAccessor::new(operator.with_context(context)),
         requests,
     )
+}
+
+fn chunked_request() -> ByteReadRequest {
+    ByteReadRequest::new("object").with_options(ByteReadOptions {
+        io_chunk_size: NonZeroUsize::new(4),
+        io_concurrency: NonZeroUsize::new(2).unwrap(),
+    })
 }
 
 #[tokio::test]
@@ -273,22 +280,14 @@ async fn range_validation_errors_leave_the_sequential_cursor_usable() {
 }
 
 #[tokio::test]
-async fn explicit_chunk_options_keep_known_length_partitioned_io() {
+async fn explicit_chunk_options_bootstrap_partitioned_io_without_head() {
     let bytes: Vec<_> = (0..32).collect();
     let (storage, requests) = storage(bytes.clone(), bytes.len(), false);
-    let reader = storage
-        .open_sequential(
-            ByteReadRequest::new("object").with_options(ByteReadOptions {
-                io_chunk_size: NonZeroUsize::new(4),
-                io_concurrency: NonZeroUsize::new(2).unwrap(),
-            }),
-        )
-        .await
-        .unwrap();
+    let reader = storage.open_sequential(chunked_request()).await.unwrap();
     assert_eq!(read_all(reader, "test").await.unwrap(), bytes);
     let requests = requests.0.lock().unwrap();
-    assert_eq!(requests[0], (Method::HEAD, None));
-    assert_eq!(requests.len(), 9);
+    assert_eq!(requests[0], (Method::GET, Some("bytes=0-3".into())));
+    assert_eq!(requests.len(), 8);
     assert!(
         requests[1..]
             .iter()
@@ -341,4 +340,146 @@ async fn dropping_a_sequential_reader_releases_its_http_permit() {
     .unwrap();
     assert_eq!(requests.0.lock().unwrap().len(), 2);
     drop(second);
+}
+
+#[tokio::test]
+async fn chunked_bootstrap_reuses_prefix() {
+    for size in [0, 1, 3, 4, 5, 17] {
+        let bytes: Vec<_> = (0..size as u8).collect();
+        let (storage, requests) = storage(bytes.clone(), size, false);
+        let storage = storage
+            .with_chunk_size(NonZeroUsize::new(3).unwrap())
+            .with_http_concurrency_limit(HttpConcurrencyLimitLayer::new(1).unwrap());
+        let mut reader = tokio::time::timeout(
+            Duration::from_secs(1),
+            storage.open_sequential(chunked_request()),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(reader.metadata().content_length, Some(size as u64));
+        assert_eq!(requests.1.load(Ordering::SeqCst), usize::from(size > 0));
+        assert!(reader.capability().read_with_range);
+        if size >= 3 {
+            assert_eq!(
+                reader.read_range(1..3).await.unwrap().as_ref(),
+                &bytes[1..3]
+            );
+            assert_eq!(requests.0.lock().unwrap().len(), 1);
+        }
+        assert_eq!(read_all(reader, "test").await.unwrap(), bytes);
+        let requests = requests.0.lock().unwrap();
+        assert_eq!(requests[0], (Method::GET, Some("bytes=0-3".into())));
+        assert_eq!(requests.len(), size.div_ceil(4).max(1));
+        assert!(requests.iter().all(|(method, _)| *method == Method::GET));
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|(_, range)| range.as_deref() == Some("bytes=0-3"))
+                .count(),
+            1
+        );
+    }
+}
+
+#[tokio::test]
+async fn chunked_bootstrap_drains_its_body_before_independent_range_reads() {
+    let bytes: Vec<_> = (0..17).collect();
+    let (storage, requests) = storage(bytes.clone(), bytes.len(), false);
+    let storage = storage.with_http_concurrency_limit(HttpConcurrencyLimitLayer::new(1).unwrap());
+    let mut reader = storage.open_sequential(chunked_request()).await.unwrap();
+    assert_eq!(requests.1.load(Ordering::SeqCst), 1);
+    let position = reader.position();
+    assert_eq!(
+        reader.read_range(1..3).await.unwrap().as_ref(),
+        &bytes[1..3]
+    );
+    let cached = reader.read_ranges(vec![0..2, 2..4]).await.unwrap();
+    assert_eq!(cached[0].as_ref(), &bytes[0..2]);
+    assert_eq!(cached[1].as_ref(), &bytes[2..4]);
+    assert_eq!(requests.0.lock().unwrap().len(), 1);
+    assert_eq!(reader.position(), position);
+    let range = tokio::time::timeout(Duration::from_secs(1), reader.read_range(8..10))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(range.as_ref(), &bytes[8..10]);
+    assert_eq!(reader.position(), position);
+    assert_eq!(read_all(reader, "test").await.unwrap(), bytes);
+}
+
+#[tokio::test]
+async fn cancelling_a_pending_bootstrap_releases_its_http_permit() {
+    let (storage, requests) = storage(vec![1, 2, 3, 4], 4, true);
+    let storage = storage.with_http_concurrency_limit(HttpConcurrencyLimitLayer::new(1).unwrap());
+    let request = ByteReadRequest::new("object").with_options(ByteReadOptions {
+        io_chunk_size: NonZeroUsize::new(4),
+        ..Default::default()
+    });
+    for _ in 0..2 {
+        assert!(
+            tokio::time::timeout(
+                Duration::from_millis(20),
+                storage.open_sequential(request.clone())
+            )
+            .await
+            .is_err()
+        );
+    }
+    assert_eq!(requests.0.lock().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn bootstrap_rejects_invalid_responses() {
+    use open_arrow_access_core::ErrorKind::{Io, Unsupported};
+    use open_arrow_access_test_support::http::{HttpFixture, response};
+    for (content_range, bytes, expected) in [
+        (Some("bytes 1-4/17"), "abcdefgh", Io),
+        (None, "abcdefgh", Unsupported),
+        (Some("bytes 0-3/8"), "ab", Io),
+        (Some("bytes 0-3/8"), "abcde", Io),
+        (Some("bytes 0-2/3"), "ab", Io),
+        (Some("bytes 0-2/3"), "abcd", Io),
+    ] {
+        let fixture = HttpFixture::new();
+        fixture.handle(move |_| {
+            let status = if content_range.is_some() {
+                StatusCode::PARTIAL_CONTENT
+            } else {
+                StatusCode::OK
+            };
+            let mut response = response(status, bytes);
+            if let Some(range) = content_range {
+                response
+                    .headers_mut()
+                    .insert(header::CONTENT_RANGE, range.parse().unwrap());
+            }
+            // An extra chunk must fail even after a short object's declared end.
+            let split = bytes.len().min(3);
+            *response.body_mut() = HttpBody::new(
+                futures::stream::iter([
+                    Ok(Buffer::from(bytes[..split].to_owned())),
+                    Ok(Buffer::from(bytes[split..].to_owned())),
+                ]),
+                Some(bytes.len() as u64),
+            );
+            Ok(response)
+        });
+        let operator =
+            Operator::new(opendal_service_http::Http::default().endpoint(fixture.endpoint()))
+                .unwrap()
+                .with_context(fixture.context());
+        let error = OpenDalAccessor::new(operator)
+            .open_sequential(
+                ByteReadRequest::new("object").with_options(ByteReadOptions {
+                    io_chunk_size: NonZeroUsize::new(4),
+                    ..Default::default()
+                }),
+            )
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(error.kind(), expected);
+        assert_eq!(fixture.requests().len(), 1);
+    }
 }

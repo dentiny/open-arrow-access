@@ -1,5 +1,6 @@
 //! Shared OpenDAL byte access.
 
+mod prefix;
 mod reader;
 
 use std::{collections::HashMap, num::NonZeroUsize, sync::Arc};
@@ -168,6 +169,30 @@ impl OpenDalAccessor {
         ))
     }
 
+    async fn open_chunked(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
+        let path = request.object.locator();
+        let size = request
+            .options
+            .io_chunk_size
+            .map_or(DEFAULT_IO_CHUNK_SIZE, |size| size.get());
+        let Some(prefix) = prefix::PrefixReader::open(self.operator(), path, size)
+            .await
+            .map_err(|e| map_error("open", path, e))?
+        else {
+            return self.open(request).await;
+        };
+        crate::validation::validate_regular_file(prefix.metadata().is_file())?;
+        let len = prefix.metadata().content_length();
+        let bytes = prefix
+            .read()
+            .await
+            .map_err(|e| map_error("read", path, e))?
+            .to_bytes();
+        let content = ReadContent::new(len).with_prefetched(0..bytes.len() as u64, bytes)?;
+        self.open_ranged(request.object, request.options, content)
+            .await
+    }
+
     /// Build the chunked reader after metadata discovery and optional prefetch.
     async fn open_ranged(
         &self,
@@ -195,12 +220,19 @@ impl OpenDalAccessor {
             )
             .gap(0);
         let inner = builder.await.map_err(|e| map_error("open", path, e))?;
+        let prefix = prefetched
+            .as_ref()
+            .and_then(PrefetchedRange::sequential_prefix);
+        let start = prefix.as_ref().map_or(0, |buffer| buffer.len() as u64);
         let stream = inner
             .clone()
-            .into_stream(0..length)
+            .into_stream(start..length)
             .await
             .map_err(|error| map_error("read", path, error))?;
-        let sequential = SequentialReader::new(stream, object, length, self.chunk_size);
+        let mut sequential = SequentialReader::new(stream, object, length, self.chunk_size);
+        if let Some(prefix) = prefix {
+            sequential = sequential.with_prefix(prefix);
+        }
         let mut reader = RangedReader::new(inner, sequential);
         if let Some(prefetched) = prefetched {
             reader = reader.with_prefetched(prefetched);
@@ -232,14 +264,15 @@ impl Accessor for OpenDalAccessor {
     async fn open_sequential(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
         let path = request.object.locator();
         if request.content_length.is_some()
-            || request.options.io_chunk_size.is_some()
-            || request.options.io_concurrency.get() > 1
             || self
                 .content_lengths
                 .as_ref()
                 .is_some_and(|lengths| lengths.contains_key(path))
         {
             return self.open(request).await;
+        }
+        if request.options.io_chunk_size.is_some() || request.options.io_concurrency.get() > 1 {
+            return self.open_chunked(request).await;
         }
         let reader = self
             .operator()

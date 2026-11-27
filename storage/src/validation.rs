@@ -1,9 +1,12 @@
-use std::time::Duration;
+use std::{ops::Range, time::Duration};
+
+use http::{HeaderMap, StatusCode, header};
 
 use indexmap::{IndexMap, map::Entry};
 
 use crate::error;
 use open_arrow_access_core::Result;
+pub(crate) use open_arrow_access_core::validate_byte_range;
 
 pub(crate) fn validate_http_request_interval(interval: Duration) -> Result<()> {
     if interval.is_zero() || tokio::time::Instant::now().checked_add(interval).is_none() {
@@ -106,4 +109,80 @@ pub(crate) fn validate_chunk_length(actual: u64, remaining: u64) -> Result<()> {
 
 pub(crate) fn range_capacity(expected: u64) -> Result<usize> {
     usize::try_from(expected).map_err(|_| crate::error::unaddressable_range())
+}
+
+/// Validate the interval before subtracting its bounds or slicing its payload.
+pub(crate) fn validate_prefetched_range(
+    range: &Range<u64>,
+    actual: u64,
+    content_length: u64,
+) -> Result<()> {
+    validate_byte_range(range, content_length, "prefetch")?;
+    validate_read_length(actual, range.end - range.start, "prefetch")
+}
+
+pub(crate) fn validate_read_path(path: &str) -> opendal::Result<()> {
+    if !opendal::raw::validate_path(path, opendal::EntryMode::FILE) {
+        return Err(error::read_path_is_directory());
+    }
+    Ok(())
+}
+
+/// Response handling needed after validating a bounded HTTP prefix request.
+pub(crate) enum HttpPrefixResponse {
+    Empty,
+    Short(u64),
+    Unchanged,
+}
+
+pub(crate) fn validate_http_prefix_response(
+    status: StatusCode,
+    headers: &HeaderMap,
+    size: u64,
+) -> opendal::Result<HttpPrefixResponse> {
+    // Only an explicit zero total proves an empty object.
+    if status == StatusCode::RANGE_NOT_SATISFIABLE
+        && headers
+            .get(header::CONTENT_RANGE)
+            .is_some_and(|value| value == "bytes */0")
+    {
+        return Ok(HttpPrefixResponse::Empty);
+    }
+    let length = if status == StatusCode::PARTIAL_CONTENT {
+        let range =
+            opendal::raw::parse_content_range(headers)?.ok_or_else(error::invalid_response)?;
+        let length = range.size().ok_or_else(error::invalid_response)?;
+        if range.range() != Some(0..length.min(size)) {
+            return Err(error::invalid_response());
+        }
+        Some(length)
+    } else if status == StatusCode::OK {
+        // Accept an ignored Range only if the whole object fits the prefix.
+        let length = opendal::raw::parse_content_length(headers)?;
+        if !length.is_some_and(|length| length <= size) {
+            return Err(error::ignored_bootstrap_range());
+        }
+        length
+    } else {
+        // Leave other statuses to the backend's normal error handling.
+        None
+    };
+    Ok(match length.filter(|length| *length < size) {
+        Some(length) => HttpPrefixResponse::Short(length),
+        None => HttpPrefixResponse::Unchanged,
+    })
+}
+
+pub(crate) fn validate_prefix_chunk_length(actual: u64, remaining: u64) -> opendal::Result<()> {
+    if actual > remaining {
+        return Err(error::invalid_response());
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_prefix_read_length(actual: u64, expected: u64) -> opendal::Result<()> {
+    if actual != expected {
+        return Err(error::invalid_response());
+    }
+    Ok(())
 }

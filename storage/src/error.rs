@@ -114,3 +114,21 @@ pub(crate) fn invalid_listing_prefix() -> Error {
         "expected an empty root prefix",
     )
 }
+
+pub(crate) fn invalid_response() -> opendal::Error {
+    opendal::Error::new(
+        opendal::ErrorKind::Unexpected,
+        "invalid bootstrap Content-Range",
+    )
+}
+
+pub(crate) fn read_path_is_directory() -> opendal::Error {
+    opendal::Error::new(opendal::ErrorKind::IsADirectory, "read path is a directory")
+}
+
+pub(crate) fn ignored_bootstrap_range() -> opendal::Error {
+    opendal::Error::new(
+        opendal::ErrorKind::Unsupported,
+        "HTTP server ignored the bootstrap byte range",
+    )
+}

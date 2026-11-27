@@ -21,6 +21,7 @@ tokio = { workspace = true, features = ["sync", "time"] }
 
 [dev-dependencies]
 more-asserts.workspace = true
+opendal = { workspace = true, features = ["services-memory"] }
 open-arrow-access-test-support.workspace = true
 opendal-service-http.workspace = true
 rstest.workspace = true

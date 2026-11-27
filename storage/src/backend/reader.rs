@@ -5,10 +5,13 @@ use std::{num::NonZeroUsize, ops::Range};
 use futures::TryStreamExt;
 use open_arrow_access_core::{
     ByteMetadata, BytePosition, ByteReader, Bytes, Capability, ObjectRef, Reader, Result,
-    async_trait, validate_byte_range,
+    async_trait,
 };
 
-use crate::error::{map_error, short_read};
+use crate::{
+    error::{map_error, short_read},
+    validation::validate_byte_range,
+};
 
 const MAX_FETCH_BATCH_SIZE: u64 = 2 * 1024 * 1024;
 // Bound scattered staging as well as payload bytes: tiny network responses
@@ -24,13 +27,12 @@ pub(super) struct PrefetchedRange {
 
 impl PrefetchedRange {
     pub(super) fn new(range: Range<u64>, bytes: Bytes, content_length: u64) -> Result<Self> {
-        validate_byte_range(&range, content_length, "prefetch")?;
-        crate::validation::validate_read_length(
-            bytes.len() as u64,
-            range.end - range.start,
-            "prefetch",
-        )?;
+        crate::validation::validate_prefetched_range(&range, bytes.len() as u64, content_length)?;
         Ok(Self { range, bytes })
+    }
+
+    pub(super) fn sequential_prefix(&self) -> Option<opendal::Buffer> {
+        (self.range.start == 0).then(|| opendal::Buffer::from(self.bytes.clone()))
     }
 
     fn slice(&self, range: &Range<u64>) -> Option<Bytes> {
@@ -246,6 +248,14 @@ impl SequentialReader {
             offset: 0,
             chunk_size,
         }
+    }
+
+    pub(super) fn with_prefix(mut self, prefix: opendal::Buffer) -> Self {
+        self.input
+            .as_mut()
+            .expect("new reader owns its input")
+            .pending = prefix;
+        self
     }
 
     fn length(&self) -> u64 {
