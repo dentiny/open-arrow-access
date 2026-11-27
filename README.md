@@ -516,3 +516,12 @@ worker. HTTP request fanout is limited to four subrequests per read. Large
 working sets can re-fetch evicted remote blocks. Generic `DuckDbDatabase`
 queries retain the on-disk cache behavior described above, and metadata imports
 and lookup preparation retain their existing resource settings.
+
+### Linking DuckDB in a host extension
+
+The default `duckdb-bundled` feature embeds DuckDB for standalone consumers.
+When building inside an existing DuckDB process, disable default features so
+the Rust service bindings use the host C API. This avoids linking a second
+DuckDB engine with incompatible C++ symbols into the same extension. Enable
+`duckdb-bundled` explicitly when using a standalone application with other
+default features disabled. The service crate exposes the same feature.
