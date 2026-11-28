@@ -39,8 +39,9 @@ courtlistener = [
     "tokio/sync",
 ]
 dataverse = []
-default = []
+default = ["duckdb-bundled"]
 doab = ["oai"]
+duckdb-bundled = ["duckdb/bundled", "duckdb/parquet"]
 federal-register = []
 figshare = []
 govinfo = []
@@ -89,7 +90,7 @@ oai = ["format-xml"]
 [dependencies]
 tempfile.workspace = true
 # Keep DuckDB on the Arrow 58 binding line used by the public workspace.
-duckdb = { version = "~1.10506.1", default-features = false, features = ["bundled", "appender-arrow", "parquet"] }
+duckdb = { version = "~1.10506.1", default-features = false, features = ["appender-arrow"] }
 arrow-cast = { workspace = true, optional = true }
 sha2 = { version = "0.11", optional = true }
 regex = { workspace = true, optional = true }
