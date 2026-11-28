@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.22.2 - 2026-11-27
+
+- Allow host extensions to disable bundled DuckDB through the `duckdb-bundled` feature, avoiding a second embedded DuckDB engine while preserving standalone defaults.
+- Release all eight public workspace crates at 0.22.2 with aligned internal dependency requirements.
+
 ## 0.22.1 - 2026-11-27
 
 - Preserve sequential storage opens through automatic decompression for both plain and compressed objects, avoiding redundant HEAD requests on the tested HTTP backend.
